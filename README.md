@@ -1,0 +1,1 @@
+# sqlite-vec1-embeddinggemma2-wasm
