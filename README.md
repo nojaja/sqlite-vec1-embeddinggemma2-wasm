@@ -77,21 +77,21 @@ npm run depcruise            # 依存関係アーキテクチャ監査
 ## 6. 利用例 (SQL セマンティック検索)
 
 ```sql
--- 1. ベクトル列を持つテーブルの作成
+-- 1. ベクトル列を持つテーブルの作成 (方式A: VECTOR(dim, 'model') STRICT)
 CREATE TABLE documents (
   id INTEGER PRIMARY KEY,
   text_data TEXT NOT NULL,
-  vector_data BLOB NOT NULL CHECK(length(vector_data)=3072)
+  embedding VECTOR(768 , 'embeddinggemma-2')
 ) STRICT;
 
 -- 2. embedding UDF によるベクトル生成と保存
-INSERT INTO documents(id, text_data, vector_data)
+INSERT INTO documents(id, text_data, embedding)
 VALUES(1, :text, embedding(:text));
 
 -- 3. embedding_query と DISTANCE による類似度順検索
-SELECT id, text_data, DISTANCE(vector_data, embedding_query(:query)) AS distance
+SELECT id, text_data
 FROM documents
-ORDER BY DISTANCE(vector_data, embedding_query(:query)), id
+ORDER BY DISTANCE(embedding, embedding_query(:query)), id
 LIMIT 3;
 ```
 
