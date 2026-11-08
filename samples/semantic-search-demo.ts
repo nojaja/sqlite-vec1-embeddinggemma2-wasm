@@ -20,7 +20,7 @@ async function runDemoWorker(baseUrl: string): Promise<void> {
       CREATE TABLE documents (
         id INTEGER PRIMARY KEY,
         text_data TEXT NOT NULL,
-        vector_data BLOB NOT NULL CHECK(length(vector_data)=3072)
+        embedding VECTOR(768 , 'embeddinggemma-2')
       ) STRICT;
     `);
     console.log("CREATE TABLE documents 成功");
@@ -32,13 +32,13 @@ async function runDemoWorker(baseUrl: string): Promise<void> {
       { id: 3, text: "可愛い犬や猫などのペットの飼育方法。" }
     ];
 
-    const insertStmt = db.prepare("INSERT INTO documents(id, text_data, vector_data) VALUES(?, ?, embedding(?))");
+    const insertStmt = db.prepare("INSERT INTO documents(id, text_data, embedding) VALUES(?, ?, embedding(?))");
     try {
       for (const doc of documents) {
         insertStmt.bind([doc.id, doc.text, doc.text]);
         insertStmt.step();
         insertStmt.reset();
-        console.log(`INSERT [id=${doc.id}] "${doc.text}" (vector length: 3072 bytes)`);
+        console.log(`INSERT [id=${doc.id}] "${doc.text}"`);
       }
     } finally {
       insertStmt.finalize();
@@ -53,9 +53,9 @@ async function runDemoWorker(baseUrl: string): Promise<void> {
 
       db.exec({
         sql: `
-          SELECT id, text_data, DISTANCE(vector_data, embedding_query(?)) AS distance
+          SELECT id, text_data, DISTANCE(embedding, embedding_query(?)) AS distance
           FROM documents
-          ORDER BY DISTANCE(vector_data, embedding_query(?)), id
+          ORDER BY DISTANCE(embedding, embedding_query(?)), id
           LIMIT 3;
         `,
         bind: [query, query],

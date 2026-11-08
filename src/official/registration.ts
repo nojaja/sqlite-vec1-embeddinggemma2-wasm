@@ -2,6 +2,7 @@ import { VectorError } from "../errors";
 import { embeddingSqlValue } from "./functions";
 import { StatementLifecycle } from "../sqlite/statement-lifecycle";
 import { officialMetadataRecord, validateOfficialMetadata } from "./metadata";
+import { interceptAndTransformSql, type VectorColumnMetadata } from "./vector-metadata";
 import type { EmbeddingControl, Sqlite3Static } from "./types";
 import type { EmbeddingCacheIdentity, EmbeddingInference } from "../inference/statement-embedding-cache";
 
@@ -300,15 +301,16 @@ export function registerEmbeddingExtension(
       if (!(left instanceof Uint8Array) || !(right instanceof Uint8Array)) {
         throw new VectorError("E_INPUT");
       }
-      if (left.byteLength !== 3072 || right.byteLength !== 3072) {
+      if (left.byteLength !== right.byteLength || left.byteLength % 4 !== 0 || left.byteLength === 0) {
         throw new VectorError("E_INPUT");
       }
+      const dim = left.byteLength / 4;
       const v1 = new DataView(left.buffer, left.byteOffset, left.byteLength);
       const v2 = new DataView(right.buffer, right.byteOffset, right.byteLength);
       let dot = 0;
       let s1 = 0;
       let s2 = 0;
-      for (let i = 0; i < 768; i++) {
+      for (let i = 0; i < dim; i++) {
         const f1 = Number(v1.getFloat32(i * 4, true));
         const f2 = Number(v2.getFloat32(i * 4, true));
         if (!Number.isFinite(f1) || !Number.isFinite(f2)) {
@@ -359,6 +361,26 @@ export function registerEmbeddingExtension(
     const db = new origDB(...args);
     const dbId = db.pointer ?? dbCounter++;
     openDatabases.add(db);
+
+    const tableMetadata: Record<string, Record<string, VectorColumnMetadata>> = {};
+
+    const origExec = db.exec.bind(db);
+    db.exec = function (optOrSql: any, ...rest: any[]) {
+      if (typeof optOrSql === "string") {
+        optOrSql = interceptAndTransformSql(optOrSql, tableMetadata);
+      } else if (optOrSql && typeof optOrSql.sql === "string") {
+        optOrSql = { ...optOrSql, sql: interceptAndTransformSql(optOrSql.sql, tableMetadata) };
+      }
+      return origExec(optOrSql, ...rest);
+    };
+
+    const origPrepare = db.prepare.bind(db);
+    db.prepare = function (sql: any, ...rest: any[]) {
+      if (typeof sql === "string") {
+        sql = interceptAndTransformSql(sql, tableMetadata);
+      }
+      return origPrepare(sql, ...rest);
+    };
 
     const origClose = db.close.bind(db);
     db.close = () => {

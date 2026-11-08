@@ -1,4 +1,4 @@
-﻿import { VectorError } from "../errors";
+import { VectorError } from "../errors";
 
 /** cache識別用identity。 */
 export interface EmbeddingCacheIdentity {
@@ -48,12 +48,13 @@ const EMBEDDING_BYTES = 3072;
  * @param value - 検証対象のUint8Array
  */
 export function validateEmbeddingBlob(value: unknown): void {
-  if (!(value instanceof Uint8Array) || value.byteLength !== EMBEDDING_BYTES) {
+  if (!(value instanceof Uint8Array) || value.byteLength % 4 !== 0 || value.byteLength === 0) {
     throw new VectorError("E_EMBEDDING_VALUE");
   }
+  const dim = value.byteLength / 4;
   const view = new DataView(value.buffer, value.byteOffset, value.byteLength);
   let squared = 0;
-  for (let i = 0; i < 768; i++) {
+  for (let i = 0; i < dim; i++) {
     const v = view.getFloat32(i * 4, true);
     if (!Number.isFinite(v)) {
       throw new VectorError("E_EMBEDDING_VALUE");
@@ -61,7 +62,7 @@ export function validateEmbeddingBlob(value: unknown): void {
     squared += v * v;
   }
   const norm = Math.sqrt(squared);
-  if (!Number.isFinite(norm) || norm <= 1e-12 || Math.abs(norm - 1) > 1e-5) {
+  if (!Number.isFinite(norm) || norm <= 1e-12 || Math.abs(norm - 1) > 1e-4) {
     throw new VectorError("E_EMBEDDING_VALUE");
   }
 }

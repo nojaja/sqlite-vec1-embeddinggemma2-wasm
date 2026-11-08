@@ -1,4 +1,4 @@
-﻿import { VectorError } from "../errors";
+import { VectorError } from "../errors";
 import type { EmbeddingCall, EmbeddingInference } from "../inference/statement-embedding-cache";
 import { formatTextInput } from "../inference/profile";
 
@@ -12,7 +12,7 @@ export function embeddingSqlValue(
   if (name === "embedding" || name === "embedding_query") {
     if (args.length >= 2) {
       const model = args[1];
-      if (model !== "embeddinggemma-2") {
+      if (model !== "embeddinggemma-2" && model !== "ruri-v3") {
         throw new VectorError("E_INPUT");
       }
     }

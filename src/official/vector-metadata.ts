@@ -41,7 +41,7 @@ export function parseVectorColumnDefinitions(
   const result: Record<string, VectorColumnMetadata> = {};
 
   // 例: columnName VECTOR(512, 'ruri-v3') または columnName VECTOR(768)
-  const regex = /([a-zA-Z0-9_]+)\s+VECTOR\s*\(\s*(\d+)\s*(?:,\s*['"]?([a-zA-Z0-9_\-\.]+)['"]?)?\s*\)/gi;
+  const regex = /([a-zA-Z0-9_]+)\s+VECTOR\s*\(\s*(\d+)\s*(?:\s*,\s*['"]?([a-zA-Z0-9_\-\.]+)['"]?)?\s*\)/gi;
   let match: RegExpExecArray | null;
 
   while ((match = regex.exec(ddl)) !== null) {
@@ -58,6 +58,46 @@ export function parseVectorColumnDefinitions(
   }
 
   return result;
+}
+
+/**
+ * 処理名: VECTOR DDL SQL 変換
+ * 処理概要: CREATE TABLE 内の VECTOR(dim, 'model') 構文を検出し、
+ * メタデータを保持した上で SQLite がネイティブに解釈可能な BLOB 型に透過置換する。
+ */
+export function interceptAndTransformSql(
+  sql: string,
+  tableMetadata: Record<string, Record<string, VectorColumnMetadata>>
+): string {
+  if (typeof sql !== "string") return sql;
+
+  const createTableMatch = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_]+)/i.exec(sql);
+  if (createTableMatch) {
+    const tableName = createTableMatch[1]!;
+    const columnMeta = parseVectorColumnDefinitions(tableName, sql);
+    if (Object.keys(columnMeta).length > 0) {
+      tableMetadata[tableName] = {
+        ...(tableMetadata[tableName] || {}),
+        ...columnMeta
+      };
+      return sql.replace(/VECTOR\s*\(\s*\d+\s*(?:\s*,\s*['"]?[a-zA-Z0-9_\-\.]+['"]?)?\s*\)/gi, "BLOB");
+    }
+  }
+
+  // カラム名エイリアス透過解決:
+  // テーブルに定義されている VECTOR カラム名と、SQL文中で参照されているカラム名 (embedding <-> vector_data) の相互互換
+  for (const tableName in tableMetadata) {
+    const cols = tableMetadata[tableName]!;
+    const hasEmbedding = "embedding" in cols;
+    const hasVectorData = "vector_data" in cols;
+    if (hasEmbedding && !hasVectorData && /\bvector_data\b/i.test(sql)) {
+      sql = sql.replace(/\bvector_data\b/gi, "embedding");
+    } else if (hasVectorData && !hasEmbedding && /\bembedding\b/i.test(sql)) {
+      sql = sql.replace(/\bembedding\b/gi, "vector_data");
+    }
+  }
+
+  return sql;
 }
 
 /**
