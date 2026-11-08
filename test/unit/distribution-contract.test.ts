@@ -1,7 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { MODEL_ID, MODEL_REVISION } from "../../src/runtime-assets/model-contract";
 import { resolveOfficialBrowserAssets } from "../../src/official/browser-inference";
 
 const rootDir = resolve(__dirname, "../..");
@@ -9,7 +8,7 @@ const rootDir = resolve(__dirname, "../..");
 describe("Distribution and Drop-in Compatibility Contracts", () => {
   describe("1. package.json and npm distribution settings contract", () => {
     const pkgPath = resolve(rootDir, "package.json");
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+    JSON.parse(readFileSync(pkgPath, "utf8"));
 
     test("defines target package contract metadata", () => {
       // 契約上の期待値定義
@@ -112,7 +111,7 @@ describe("Distribution and Drop-in Compatibility Contracts", () => {
         architecture: string;
       }
 
-      function validateRelaxedThreadPolicy(env: RelaxedEnvironment): boolean {
+      function validateRelaxedThreadPolicy(_env: RelaxedEnvironment): boolean {
         // メインスレッド (worker: false) でも環境エラーで即座に拒否しない
         return true;
       }

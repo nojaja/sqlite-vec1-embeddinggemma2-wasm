@@ -12,7 +12,7 @@ export async function runBrowserSampleSupervisor(): Promise<void> {
 
   setStatus("Starting browser sample...");
 
-  const worker = new Worker(new URL("./owner.mjs", import.meta.url), { type: "module" });
+  const worker = new Worker(new URL("./owner.mjs", location.href), { type: "module" });
 
   try {
     setStatus("Executing online walkthrough...");

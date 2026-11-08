@@ -1,26 +1,71 @@
-﻿import { VectorError } from "../errors";
+import { VectorError } from "../errors";
 
+/**
+ * 処理名: 推論バックエンド種別
+ * 処理概要: サポートされる推論バックエンド一覧。
+ * 実装理由: 実行環境に応じた最適なアクセラレータを選択するため。
+ */
 export type Backend = "wasm" | "webgpu" | "directml";
 
+/**
+ * 処理名: モデル取得設定
+ * 処理概要: モデル資材の取得元やネットワーク利用ポリシーを定義する。
+ * 実装理由: オンライン/オフライン動作を制御するため。
+ */
+export interface ModelOptions {
+  /** ネットワーク利用ポリシー ("allow" または "offline") */
+  network: "allow" | "offline";
+  /** ベースURL */
+  baseUrl?: string | undefined;
+}
+
+/**
+ * 処理名: 埋め込み設定オプション
+ * 処理概要: モデル取得・バックエンド・タイムアウト設定を定義する。
+ * 実装理由: ユーザーが推論動作をカスタマイズできるようにするため。
+ */
 export interface EmbeddingOptions {
-  backend?: Backend;
-  model: { network: "allow" | "offline"; baseUrl?: string };
-  cacheDirectory?: string;
-  initTimeoutMs?: number;
-  sqlTimeoutMs?: number;
+  /** バックエンド種別 */
+  backend?: Backend | undefined;
+  /** モデル取得設定 */
+  model: ModelOptions;
+  /** キャッシュディレクトリ */
+  cacheDirectory?: string | undefined;
+  /** 初期化タイムアウトミリ秒 */
+  initTimeoutMs?: number | undefined;
+  /** SQLタイムアウトミリ秒 */
+  sqlTimeoutMs?: number | undefined;
 }
 
+/**
+ * 処理名: 初期化実行環境情報
+ * 処理概要: 実行中のプラットフォームやランタイム環境メタデータ。
+ * 実装理由: 環境ポリシーの遵守と適切なバックエンド選択のため。
+ */
 export interface InitializationEnvironment {
+  /** Workerスレッド内実行か否か */
   worker: boolean;
+  /** ランタイム種別 */
   runtime: "node" | "browser";
+  /** OSプラットフォーム */
   platform: string;
+  /** CPUアーキテクチャ */
   architecture: string;
-  nodeMajor?: number;
+  /** Node.jsメジャーバージョン */
+  nodeMajor?: number | undefined;
 }
 
+/**
+ * 処理名: 検証済み埋め込み設定オプション
+ * 処理概要: デフォルト値が適用され検証済みの埋め込み設定。
+ * 実装理由: 内部処理で確定した設定値を利用するため。
+ */
 export interface ReadyEmbeddingOptions extends EmbeddingOptions {
+  /** 確定バックエンド */
   backend: Backend;
+  /** 確定初期化タイムアウト */
   initTimeoutMs: number;
+  /** 確定SQLタイムアウト */
   sqlTimeoutMs: number;
 }
 

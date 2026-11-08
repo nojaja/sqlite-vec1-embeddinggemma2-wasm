@@ -11,6 +11,7 @@ async function runOfficialBrowserOwner(event: MessageEvent<{ backend: "wasm" | "
   const root = location.origin;
   const module = await import(root + "/dist/browser/index.mjs") as { default: (options?: ProductInitOptions) => Promise<ProductSqlite3> };
   const sqlite3 = await module.default({ embedding: { model: { network: event.data.network, baseUrl: root + "/models/fixed/" }, backend: event.data.backend } });
+  if (!sqlite3.installOpfsSAHPoolVfs) throw new Error("installOpfsSAHPoolVfs not available");
   const pool = await sqlite3.installOpfsSAHPoolVfs({ name: "official-product-test", directory: "/official-product-test", clearOnInit: false, preserveOnInitFailure: true });
   const database = new pool.OpfsSAHPoolDb("/documents.sqlite3");
   try {

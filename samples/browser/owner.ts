@@ -8,8 +8,9 @@ import type { ProductInitOptions, ProductSqlite3 } from "../../src/official/type
  */
 export async function runOwnedBrowser(network: "allow" | "offline" = "allow"): Promise<void> {
   const root = location.origin;
-  const module = await import("../../src/index-browser") as { default: (options?: ProductInitOptions) => Promise<ProductSqlite3> };
+  const module = await import("../../src/index-browser.js") as unknown as { default: (options?: ProductInitOptions) => Promise<ProductSqlite3> };
   const sqlite3 = await module.default({ embedding: { model: { network, baseUrl: root + "/models/fixed/" }, backend: "wasm" } });
+  if (!sqlite3.installOpfsSAHPoolVfs) throw new Error("installOpfsSAHPoolVfs not available");
   const pool = await sqlite3.installOpfsSAHPoolVfs({ name: "official-sample", directory: "/official-sample", clearOnInit: false, preserveOnInitFailure: true });
   const database = new pool.OpfsSAHPoolDb("/documents.sqlite3");
   try {

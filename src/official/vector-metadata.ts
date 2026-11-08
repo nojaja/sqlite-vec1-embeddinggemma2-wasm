@@ -10,24 +10,24 @@ export interface VectorColumnMetadata {
   tableName: string;
   columnName: string;
   dimension: number;
-  modelName?: string;
+  modelName?: string | undefined;
 }
 
 export interface ModelProfileDefinition {
   name: string;
   path: string;
-  dimension?: number;
-  normalize?: boolean;
+  dimension?: number | undefined;
+  normalize?: boolean | undefined;
   prefix?: {
-    query?: string;
-    document?: string;
-  };
+    query?: string | undefined;
+    document?: string | undefined;
+  } | undefined;
 }
 
 export interface ModelResolutionContext {
-  explicitModel?: string;
-  activeModels?: string[];
-  defaultModel?: string;
+  explicitModel?: string | undefined;
+  activeModels?: string[] | undefined;
+  defaultModel?: string | undefined;
 }
 
 /**

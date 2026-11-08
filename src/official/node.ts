@@ -7,6 +7,13 @@ import type { ProductInitOptions, ProductSqlite3 } from "./types";
 import { createNodeInferenceSession } from "./node-inference";
 import { installNodeFileVfs } from "./node-vfs";
 
+/**
+ * 処理名: Node向けSQLite3ランタイム初期化
+ * 処理概要: Node.js環境向けに公式SQLite3ランタイムと埋め込み拡張を初期化する。
+ * 実装理由: Node.js上でベクトル検索付きSQLiteを利用可能にするため。
+ * @param options - 製品初期化オプション。
+ * @returns 初期化済みProductSqlite3インスタンス。
+ */
 export default async function initialize(options: ProductInitOptions = {}): Promise<ProductSqlite3> {
   if (options.embedding && isMainThread) {
     throw new VectorError("E_ENVIRONMENT");

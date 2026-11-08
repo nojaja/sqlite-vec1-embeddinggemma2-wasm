@@ -1,4 +1,4 @@
-﻿import { initializeOfficialRuntime } from "./initialize";
+import { initializeOfficialRuntime } from "./initialize";
 import type { ProductInitOptions, ProductSqlite3 } from "./types";
 import { MODEL_ID, MODEL_REVISION } from "../runtime-assets/model-contract";
 
@@ -8,7 +8,7 @@ export async function sqlite3Worker1Promiser(...args: any[]): Promise<any> {
 }
 
 export default async function initialize(options: ProductInitOptions = {}): Promise<ProductSqlite3> {
-  const isDedicatedWorker = typeof WorkerGlobalScope !== "undefined" && typeof (self as any).importScripts === "function";
+  const isDedicatedWorker = typeof (globalThis as any).WorkerGlobalScope !== "undefined" && typeof (self as any).importScripts === "function";
   const factory = async (opts?: any) => {
     const mod = await import("../../downloads/sqlite-official/sqlite3-bundler-friendly.mjs");
     return (mod as any).default(opts);

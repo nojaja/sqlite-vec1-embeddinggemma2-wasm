@@ -7,10 +7,10 @@ import type { EmbeddingControl, Sqlite3Static } from "./types";
 import type { EmbeddingCacheIdentity, EmbeddingInference } from "../inference/statement-embedding-cache";
 
 export interface RegistrationOptions {
-  identity?: EmbeddingCacheIdentity;
-  timeoutMs?: number;
-  information?: Record<string, unknown>;
-  check?: () => void;
+  identity?: EmbeddingCacheIdentity | undefined;
+  timeoutMs?: number | undefined;
+  information?: Record<string, unknown> | undefined;
+  check?: (() => void) | undefined;
 }
 
 const DEFAULT_IDENTITY: EmbeddingCacheIdentity = {
@@ -102,7 +102,7 @@ export function registerEmbeddingExtension(
     const effectiveN = (user && user.nOp > 0) ? Math.min(user.nOp, internalN) : internalN;
 
     let opCounter = 0;
-    origProgressHandler(pDb, effectiveN, (pApp: any) => {
+    origProgressHandler(pDb, effectiveN, (_pApp: any) => {
       const state = getDbState(pDb);
       opCounter += effectiveN;
 

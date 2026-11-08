@@ -95,7 +95,7 @@ async function verifyWebpackDemo(browser: Browser, root: string, name: string, e
     return { name, status: "passed", externalRequests };
   } finally {
     await context.close();
-    await new Promise<void>((complete, reject) => server.close((failure) => failure ? reject(failure) : complete()));
+    await new Promise<void>((complete, reject) => server.close((failure: any) => failure ? reject(failure) : complete()));
   }
 }
 
@@ -108,7 +108,7 @@ async function verifyWebpackDemo(browser: Browser, root: string, name: string, e
 async function testSqliteWasmCompatibility(): Promise<void> {
   const loader = resolve("dist/browser/index.mjs");
   await access(loader);
-  const selected = sqliteWasmDemoCases.filter((candidate) => process.argv[2] === undefined || candidate.name === process.argv[2]);
+  const selected = sqliteWasmDemoCases.filter((candidate: any) => process.argv[2] === undefined || candidate.name === process.argv[2]);
   if (selected.length === 0) throw new Error("SQLITE_WASM_DEMO_UNKNOWN");
   await mkdir(".build", { recursive: true });
   const temporary = await mkdtemp(resolve(".build/sqlite-wasm-compat-"));

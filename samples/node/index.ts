@@ -1,5 +1,5 @@
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
-import { createServer, type Server } from "node:http";
+import { createServer } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import initialize from "../../src/official/node";

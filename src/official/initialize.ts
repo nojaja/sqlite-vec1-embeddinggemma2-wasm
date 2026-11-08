@@ -1,4 +1,3 @@
-import { VectorError } from "../errors";
 import { validateEmbeddingOptions, type InitializationEnvironment } from "./options";
 import { registerEmbeddingExtension } from "./registration";
 import type { OfficialFactory, OfficialInferenceFactory, ProductInitOptions, ProductSqlite3 } from "./types";

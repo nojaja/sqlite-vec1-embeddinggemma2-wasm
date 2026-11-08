@@ -52,6 +52,7 @@ if (!isMainThread) {
 
       const res = await session.run(feeds);
       const outputTensor = res.sentence_embedding || res.token_embeddings;
+      if (!outputTensor) throw new Error("No output tensor from Ruri session");
       const rawData = outputTensor.data as Float32Array;
 
       // 512 次元 L2 正規化
@@ -93,7 +94,10 @@ if (!isMainThread) {
     console.log("  -> Ruri-v3 推論ワーカー起動完了 (512次元 Float32)");
 
     function inferRuriSync(call: EmbeddingCall): Uint8Array {
-      const text = call.body ?? "";
+      if (call.operation === "image") {
+        throw new Error("Ruri does not support image embedding");
+      }
+      const text = typeof call.body === "string" ? call.body : String(call.body ?? "");
       const textBytes = new TextEncoder().encode(text);
       dataView.set(textBytes, 0);
 

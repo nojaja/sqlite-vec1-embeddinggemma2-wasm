@@ -1,27 +1,77 @@
 import { VectorError } from "../errors";
 
-/** cache識別用identity。 */
+/**
+ * 処理名: 埋め込みキャッシュ識別情報
+ * 処理概要: モデル・リビジョン・フィンガープリント等のキャッシュキー識別情報を定義する。
+ * 実装理由: 異なるモデルや実行環境間でキャッシュが混ざることを防ぐため。
+ */
 export interface EmbeddingCacheIdentity {
+  /** モデルID */
   modelId: string;
+  /** リビジョン */
   revision: string;
+  /** フィンガープリント */
   fingerprint: string;
+  /** プロファイル名 */
   profile: string;
+  /** バックエンド名 */
   backend: string;
+  /** 実行時生成番号 */
   runtimeGeneration: number;
 }
 
-/** 埋め込み呼出し引数。 */
-export type EmbeddingCall =
-  | { operation: "query" | "document"; body: unknown; title?: unknown }
-  | { operation: "image"; bytes: Uint8Array; mime: string };
+/**
+ * 処理名: テキスト埋め込み呼出し引数
+ * 処理概要: テキストクエリまたはドキュメントの入力情報。
+ * 実装理由: テキスト推論入力を型定義するため。
+ */
+export interface TextEmbeddingCall {
+  /** 操作種別 ("query" または "document") */
+  operation: "query" | "document";
+  /** 本文テキスト */
+  body: unknown;
+  /** タイトル (任意) */
+  title?: unknown;
+}
 
-/** 実行時予算。 */
+/**
+ * 処理名: 画像埋め込み呼出し引数
+ * 処理概要: 画像バイト配列とMIMEタイプの入力情報。
+ * 実装理由: マルチモーダル画像推論入力を型定義するため。
+ */
+export interface ImageEmbeddingCall {
+  /** 操作種別 ("image") */
+  operation: "image";
+  /** 画像バイト配列 */
+  bytes: Uint8Array;
+  /** MIMEタイプ */
+  mime: string;
+}
+
+/**
+ * 処理名: 埋め込み呼び出し入力引数型
+ * 処理概要: テキストクエリ、ドキュメント、または画像バイト配列の入力形式を定義する。
+ * 実装理由: 多様な入力形式を統一的に受け付けるため。
+ */
+export type EmbeddingCall = TextEmbeddingCall | ImageEmbeddingCall;
+
+/**
+ * 処理名: 推論実行時予算インターフェース
+ * 処理概要: 実行デッドラインとキャンセル共有バッファを管理する。
+ * 実装理由: 長時間実行やタイムアウト時に推論を安全に中断するため。
+ */
 export interface EmbeddingExecutionBudget {
+  /** デッドライン時刻 */
   deadline: number;
+  /** キャンセル同期用共有バッファ */
   cancellationBuffer: SharedArrayBuffer;
 }
 
-/** 推論呼出し関数。 */
+/**
+ * 処理名: 埋め込み推論関数型
+ * 処理概要: テキストまたは画像入力を受け取りベクトルBLOBを同期計算する関数。
+ * 実装理由: 推論エンジンとの統一インターフェースを定義するため。
+ */
 export type EmbeddingInference = (
   request: EmbeddingCall,
   budget?: EmbeddingExecutionBudget
@@ -69,7 +119,7 @@ export function validateEmbeddingBlob(value: unknown): void {
 
 interface CacheNode {
   keyStr: string;
-  imageBytes?: Uint8Array;
+  imageBytes?: Uint8Array | undefined;
   value: Uint8Array;
   size: number;
   prev: CacheNode | null;

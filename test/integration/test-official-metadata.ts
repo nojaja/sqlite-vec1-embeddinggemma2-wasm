@@ -26,7 +26,7 @@ async function testOfficialMetadata(): Promise<void> {
     assert.throws(() => database.exec("PRAGMA writable_schema=ON"), /authorized|E_MODEL/u);
     database.exec("BEGIN; CREATE TABLE business(value); INSERT INTO business VALUES(1); COMMIT");
     assert.equal(database.selectValue("SELECT value FROM business"), 1);
-    sqlite3.capi.sqlite3_set_authorizer(database, (_argument, action, first) => action === sqlite3.capi.SQLITE_READ && first === "business" ? sqlite3.capi.SQLITE_DENY : sqlite3.capi.SQLITE_OK, 0);
+    sqlite3.capi.sqlite3_set_authorizer(database, (_argument: any, action: any, first: any) => action === sqlite3.capi.SQLITE_READ && first === "business" ? sqlite3.capi.SQLITE_DENY : sqlite3.capi.SQLITE_OK, 0);
     assert.throws(() => database.selectValue("SELECT value FROM business"), /prohibited|authorized/u);
     assert.throws(() => database.exec("DELETE FROM _svw_meta"), /authorized|E_MODEL/u);
   } finally { database.close(); }

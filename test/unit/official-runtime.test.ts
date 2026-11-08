@@ -65,7 +65,7 @@ test("official real runtime: composes trace/authorizer and isolates interleaved 
     } finally { first.finalize(); second.finalize(); }
     expect(traceCalls).toBeGreaterThan(0);
     expect(() => database.exec("DELETE FROM _svw_meta")).toThrow();
-    api.capi.sqlite3_set_authorizer(database, (_argument, action, name) => action === api.capi.SQLITE_READ && name === "_svw_meta" ? api.capi.SQLITE_DENY : api.capi.SQLITE_OK, 0);
+    api.capi.sqlite3_set_authorizer(database, (_argument: any, action: any, name: any) => action === api.capi.SQLITE_READ && name === "_svw_meta" ? api.capi.SQLITE_DENY : api.capi.SQLITE_OK, 0);
     expect(() => database.selectValue("SELECT metadata FROM _svw_meta")).toThrow();
   } finally { database.close(); other.close(); }
   await control.close();

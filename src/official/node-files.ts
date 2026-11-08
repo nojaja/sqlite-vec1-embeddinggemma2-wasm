@@ -1,4 +1,4 @@
-﻿import { createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   closeSync,
   constants,
@@ -14,7 +14,7 @@ import {
   writeSync
 } from "node:fs";
 import { createServer, type Server } from "node:net";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { VectorError } from "../errors";
 
@@ -30,7 +30,7 @@ interface OpenFileEntry {
   filename: string;
   isTemp: boolean;
   removeOnClose: boolean;
-  lockServer?: Server;
+  lockServer?: Server | undefined;
 }
 
 export function canonicalNodeSqlitePath(filename: string): string {
@@ -91,10 +91,8 @@ export class NodeSqliteFiles {
         }
 
         const server = createServer();
-        let locked = false;
         try {
           server.listen(pipeName);
-          locked = true;
         } catch (e: any) {
           if (e?.code === "EADDRINUSE") {
             throw new VectorError("E_DATABASE_LOCKED");
