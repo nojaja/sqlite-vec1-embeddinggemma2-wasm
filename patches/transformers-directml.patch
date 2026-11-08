@@ -1,0 +1,11 @@
+--- a/src/backends/onnx.js
++++ b/src/backends/onnx.js
+@@ -100,6 +100,8 @@
+ if (ORT_SYMBOL in globalThis) {
+     // If the JS runtime exposes their own ONNX runtime, use it
+     ONNX = globalThis[ORT_SYMBOL];
++    supportedDevices.push('dml', 'cpu');
++    defaultDevices = ['dml'];
+ } else if (apis.IS_NODE_ENV) {
+     ONNX = ONNX_NODE;
+ 
