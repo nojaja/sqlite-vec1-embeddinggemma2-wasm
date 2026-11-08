@@ -38,7 +38,7 @@
 推論ビルドは、推論 Worker が利用するバイナリおよびライブラリを `dist/` 配下に構成する。
 
 ### 3.1 ORT ランタイムおよび画像コーデック Wasm の配置
-- `downloads/` または `node_modules` より、以下のファイルを `dist/ort/` へ配置する：
+- `node_modules/onnxruntime-web/dist/` より、以下のファイルを `dist/ort/` へ配置する：
   - `ort-wasm-simd-threaded.jsep.mjs`
   - `ort-wasm-simd-threaded.jsep.wasm`
   - `ort-wasm-simd-threaded.jspi.mjs`
@@ -49,7 +49,7 @@
   - `resize.wasm` (`@jsquash/resize`)
 
 ### 3.2 Transformers.js のパッチ適用とバンドル
-`downloads/huggingface-transformers-4.3.1.tgz` を作業領域に展開し、以下のパッチを適用してバンドルを生成する：
+`node_modules/@huggingface/transformers` を作業領域にコピーし、以下のパッチを適用してバンドルを生成する：
 
 1. **Portable パッチ (`patches/transformers-portable.patch`)**:
    - Node.js 環境での Wasm 実行時、スレッド数設定がデフォルトのままだと `onnxruntime-web` が動的 blob URL (`blob:...`) によるワーカーインポートを試みて Node.js の ESM ローダーで例外となる問題を防止。

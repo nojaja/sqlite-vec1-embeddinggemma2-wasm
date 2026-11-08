@@ -12,7 +12,6 @@
 | --- | --- |
 | 公式 SQLite 完成モジュール | `downloads/sqlite-official/` 配下に SQLite 3.54.1 と vec1 0.7 を組み込んだ公式 Wasm および loader 群（`sqlite3-node.mjs`, `sqlite3.wasm`, `sqlite3-bundler-friendly.mjs` 等）を配置する。 |
 | 配布・互換検証用 archive | 公式 npm 配布物（`sqlite-wasm-3.54.1-build1.tgz`）および公式 demo リポジトリアーカイブ（`sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz`）を取得し、型の整合および互換性を検証する。 |
-| 推論ライブラリ archive | `huggingface-transformers-4.3.1.tgz`、`onnxruntime-node-1.31.1.tgz`、`onnxruntime-common-1.31.1.tgz`、`wabt-1.0.36.tgz` を取得し、推論ビルドの入力とする。 |
 | manifests/embeddinggemma2-q4.json | モデルの 11 資材の完全性（ファイルサイズおよび SHA-256）を定義し、推論初期化時に検証する。 |
 | 推論モデル (EmbeddingGemma 2) | HuggingFace の固定リビジョンから 11 資材を取得し、`model/embeddinggemma-2-ONNX/daa72c51243991dfcaf9f9137d2c573d8f7790c0/` へ配置する。 |
 
@@ -31,10 +30,6 @@
 | `downloads/sqlite-official/sqlite3-opfs-async-proxy.js` | 公式配布物より配置 | OPFS 非同期プロキシスクリプト |
 | `downloads/sqlite-wasm-3.54.1-build1.tgz` | `https://registry.npmjs.org/@sqlite.org/sqlite-wasm/-/sqlite-wasm-3.54.1-build1.tgz` | 公開型定義および互換性照合用 |
 | `downloads/sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz` | `https://codeload.github.com/sqlite/sqlite-wasm/tar.gz/ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a` | 公式 9 デモ検証用リポジトリアーカイブ |
-| `downloads/huggingface-transformers-4.3.1.tgz` | `https://registry.npmjs.org/@huggingface/transformers/-/transformers-4.3.1.tgz` | 推論エンジン基盤 (Transformers.js) |
-| `downloads/wabt-1.0.36.tgz` | `https://registry.npmjs.org/wabt/-/wabt-1.0.36.tgz` | Wasm バイトコード検証・変換ツール |
-| `downloads/onnxruntime-node-1.31.1.tgz` | `https://registry.npmjs.org/onnxruntime-node/-/onnxruntime-node-1.31.1.tgz` | Node DirectML ネイティブバイナリ供給 |
-| `downloads/onnxruntime-common-1.31.1.tgz` | `https://registry.npmjs.org/onnxruntime-common/-/onnxruntime-common-1.31.1.tgz` | ONNX Runtime 共通インターフェース |
 
 ---
 

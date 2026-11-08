@@ -65,7 +65,7 @@ engine.attachは一度だけ。closedまたは二重attach、未attachのembed�
 
 ### 2.1 Portable互換処理
 
-固定Transformers.jsをprivate stagingへ展開し、Node portable経路からonnxruntime-nodeとsharp importを除去する。Node環境自体を偽装せず、device許可とruntime選択だけをwasmへ限定する。session作成/run queueは直列化し、rejectionが次の正常要求へ連鎖しないようにする。`patches/transformers-portable.patch` により、Node.js 環境での動的 `blob:` URL のインポート失敗を防ぐ `numThreads = 1` 参照反映と、直列化プロミスチェーンでの例外連鎖防止、`return_path` 最適化の無効化（Uint8Array メモリバッファ供給）を確実に適用する。
+Transformers.js (`@huggingface/transformers`) を private staging へ配置し、Node portable経路からonnxruntime-nodeとsharp importを除去する。Node環境自体を偽装せず、device許可とruntime選択だけをwasmへ限定する。session作成/run queueは直列化し、rejectionが次の正常要求へ連鎖しないようにする。`patches/transformers-portable.patch` により、Node.js 環境での動的 `blob:` URL のインポート失敗を防ぐ `numThreads = 1` 参照反映と、直列化プロミスチェーンでの例外連鎖防止、`return_path` 最適化の無効化（Uint8Array メモリバッファ供給）を確実に適用する。
 
 core graphをUint8Array、externalDataを `{path,data}` bytesで供給する。native向けreturn_path最適化をportable経路で無効にする。external data名はgraphの相対名であり、cache絶対pathではない。RawImageを第3節のportable adapterへ置換し、sessionの上流error loggingからtensor/入力を除く。browser bundleへNode builtin/native依存を到達させない。
 
@@ -87,7 +87,7 @@ resizeは同寸法なら同instanceを返す。その他はrgb()後にalpha=255�
 
 ### 4.1 事前検証とnative inventory
 
-Windows x64 Node24で明示directmlのときだけ、optional dependencyの `onnxruntime-node@1.31.1` を使う。owner側ではbindingをrequireせず、package metadataと次のnative root直下全fileを計測する。version、不足、重複、余分なentry、directory、byte数/hash不一致はE_ASSET_INTEGRITY。未導入/非対応platform/load不能/DML非bundledはE_ENVIRONMENT。model取得前に拒否する。
+Windows x64 Node24で明示directmlのときだけ、`onnxruntime-node@1.31.1` を使う。owner側ではbindingをrequireせず、package metadataと次のnative root直下全fileを計測する。version、不足、重複、余分なentry、directory、byte数/hash不一致はE_ASSET_INTEGRITY。未導入/非対応platform/load不能/DML非bundledはE_ENVIRONMENT。model取得前に拒否する。
 
 rootは `bin/napi-v6/win32/x64/`。
 

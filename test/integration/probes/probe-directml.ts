@@ -1,5 +1,6 @@
 import { build, type OnResolveArgs, type OnResolveResult } from "esbuild";
 import { execFileSync } from "node:child_process";
+import { cpSync, existsSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -314,7 +315,11 @@ function setupPortableImage(plugin: import("esbuild").PluginBuild): void {
 async function prepareUpstream(): Promise<void> {
   await rm(".build/directml-validation", { recursive: true, force: true });
   await mkdir(upstreamRoot, { recursive: true });
-  execFileSync("tar", ["-xf", resolve("downloads/huggingface-transformers-4.3.1.tgz"), "-C", upstreamRoot, "--strip-components=1"], { stdio: "inherit" });
+  const nodeModulesPkg = resolve("node_modules/@huggingface/transformers");
+  if (!existsSync(nodeModulesPkg)) {
+    throw new Error("TRANSFORMERS_UPSTREAM_MISSING");
+  }
+  cpSync(nodeModulesPkg, upstreamRoot, { recursive: true });
   execFileSync("git", ["apply", "--unidiff-zero", "--ignore-space-change", "--ignore-whitespace", `--directory=${upstreamPatchRoot}`, "patches/transformers-directml.patch"], { stdio: "inherit" });
 }
 

@@ -33,10 +33,6 @@ npm install --ignore-scripts --progress=false --loglevel=info
 | `downloads/sqlite-official/` | 公式配布物より配置（`sqlite3.wasm`, `sqlite3-node.mjs`, `sqlite3-bundler-friendly.mjs` 等） |
 | `downloads/sqlite-wasm-3.54.1-build1.tgz` | `https://registry.npmjs.org/@sqlite.org/sqlite-wasm/-/sqlite-wasm-3.54.1-build1.tgz` |
 | `downloads/sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz` | `https://codeload.github.com/sqlite/sqlite-wasm/tar.gz/ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a` |
-| `downloads/huggingface-transformers-4.3.1.tgz` | `https://registry.npmjs.org/@huggingface/transformers/-/transformers-4.3.1.tgz` |
-| `downloads/wabt-1.0.36.tgz` | `https://registry.npmjs.org/wabt/-/wabt-1.0.36.tgz` |
-| `downloads/onnxruntime-node-1.31.1.tgz` | `https://registry.npmjs.org/onnxruntime-node/-/onnxruntime-node-1.31.1.tgz` |
-| `downloads/onnxruntime-common-1.31.1.tgz` | `https://registry.npmjs.org/onnxruntime-common/-/onnxruntime-common-1.31.1.tgz` |
 | `model/embeddinggemma-2-ONNX/daa72c51243991dfcaf9f9137d2c573d8f7790c0/` | HuggingFace `onnx-community/embeddinggemma-2-ONNX` より 11 資材（`model_q4.onnx`, `config.json` 等） |
 
 資材配置の検証は以下のコマンドで実行できます：
