@@ -1,11 +1,19 @@
 {
-  "name": "sqlite-vec1-embeddinggemma2-wasm",
+  "name": "@nojaja/sqlite-vec1-embeddinggemma2-wasm",
   "version": "0.0.1",
   "description": "SQLite official vec1 and EmbeddingGemma 2 with WebAssembly runtimes",
-  "private": true,
+  "keywords": ["sqlite", "sqlite-wasm", "vector-search", "embeddings", "typescript"],
+  "private": false,
   "type": "commonjs",
   "main": "./dist/index.bundle.js",
   "types": "./dist/index.d.ts",
+  "publishConfig": { "access": "public" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nojaja/sqlite-vec1-embeddinggemma2-wasm.git"
+  },
+  "bugs": { "url": "https://github.com/nojaja/sqlite-vec1-embeddinggemma2-wasm/issues" },
+  "homepage": "https://github.com/nojaja/sqlite-vec1-embeddinggemma2-wasm#readme",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
