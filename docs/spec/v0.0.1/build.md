@@ -109,7 +109,7 @@ esbuild で CJS 形式でバンドルする際、以下の設定を施す：
 - 公開設定: `"private": false`、`"publishConfig": { "access": "public" }`
 - 同梱ファイル (`files`):
   - `dist/`: バンドル済み JavaScript、Wasm バイナリ、型定義 (`index.d.ts`, `index.d.mts` 等)
-  - `manifests/`: `embeddinggemma2-q4.json`
-  - `README.md`: 利用ドキュメント
+- `manifests/`: `embeddinggemma2-q4.json`
+- `README.md`: 利用ドキュメント
   - `LICENSE`: ライセンス表示
   - `package.json`: 公式互換エクスポート定義およびメタデータ

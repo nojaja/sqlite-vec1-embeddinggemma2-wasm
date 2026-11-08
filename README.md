@@ -89,7 +89,7 @@ INSERT INTO documents(id, text_data, embedding)
 VALUES(1, :text, embedding(:text));
 
 -- 3. embedding_query と DISTANCE による類似度順検索
-SELECT id, text_data
+SELECT id, text_data, DISTANCE(embedding, embedding_query(:query)) AS distance
 FROM documents
 ORDER BY DISTANCE(embedding, embedding_query(:query)), id
 LIMIT 3;
