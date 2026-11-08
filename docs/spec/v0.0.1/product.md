@@ -99,15 +99,15 @@ vec1は公式SQLite Wasm組み込みの仮想テーブル拡張、embedding系�
 ### 4.2 方式A: `VECTOR(dim, 'model')` 型定義と自動モデル判断
 
 #### 4.2.1 DDL 構文とスキーマ解析
-SQLite の動的型付けアフィニティを活かし、テーブル定義時にベクトル型およびメタデータを定義する：
+SQLite の動的型付けアフィニティおよび DDL 透過インターセプトを活かし、テーブル定義時にベクトル型およびメタデータを定義する：
 ```sql
-CREATE TABLE items (
+CREATE TABLE documents (
   id INTEGER PRIMARY KEY,
-  content TEXT,
-  embedding VECTOR(512, 'ruri-v3')
-);
+  text_data TEXT NOT NULL,
+  embedding VECTOR(768 , 'embeddinggemma-2')
+) STRICT;
 ```
-- ライブラリは `CREATE TABLE` 実行時または接続初期化時に `sqlite_schema` を読み取り、テーブル名・カラム名・次元数・モデル名のマッピング辞書を構築・保持する。
+- ライブラリは `CREATE TABLE` 実行時または接続初期化時に DDL をインターセプト・解析し、テーブル名・カラム名・次元数・モデル名のマッピング辞書を構築・保持する。内部的には SQLite のネイティブストレージ層（`STRICT` 指定テーブルを含む）へ透過的に適合させる。
 
 #### 4.2.2 `[model]` パラメータの自動解決優先順位
 SQL 文中で `embedding(text)` や `embedding_query(text)` の第2引数 `[model]` が省略された場合、以下の優先順位で自動解決される：
@@ -149,12 +149,12 @@ keyのidentityは `[modelId,revision,fingerprint,profile,backend,runtimeGenerati
 CREATE TABLE documents (
   id INTEGER PRIMARY KEY,
   text_data TEXT NOT NULL,
-  vector_data BLOB NOT NULL CHECK(length(vector_data)=3072)
+  embedding VECTOR(768 , 'embeddinggemma-2')
 ) STRICT;
-INSERT INTO documents(id,text_data,vector_data)
+INSERT INTO documents(id,text_data,embedding)
 VALUES(1,:text,embedding(:text));
 SELECT id,text_data FROM documents
-ORDER BY DISTANCE(vector_data,embedding_query(:query)),id LIMIT 3;
+ORDER BY DISTANCE(embedding,embedding_query(:query)),id LIMIT 3;
 ```
 
 `embedding(:query)`も有効だが文書用prefixとなり、検索用と同じvector/順位を保証しない。次の形式はquery評価を明示的に分離する。
@@ -162,12 +162,12 @@ ORDER BY DISTANCE(vector_data,embedding_query(:query)),id LIMIT 3;
 ```sql
 WITH q(vector) AS MATERIALIZED(SELECT embedding_query(:query))
 SELECT d.id,d.text_data FROM documents AS d CROSS JOIN q
-ORDER BY DISTANCE(d.vector_data,q.vector),d.id LIMIT 3;
+ORDER BY DISTANCE(d.embedding,q.vector),d.id LIMIT 3;
 CREATE VIRTUAL TABLE document_vectors USING vec1(vector);
 INSERT INTO document_vectors(cmd,arg)
 VALUES('rebuild','{"index":"flat","distance":"cos"}');
 INSERT INTO document_vectors(rowid,vector)
-SELECT id,vector_data FROM documents;
+SELECT id,embedding FROM documents;
 WITH q(vector) AS MATERIALIZED(SELECT embedding_query(:query))
 SELECT d.id,c.distance FROM q
 CROSS JOIN document_vectors(q.vector,'{"k":3}') AS c

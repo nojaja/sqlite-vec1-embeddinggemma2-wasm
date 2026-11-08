@@ -16,7 +16,7 @@
    - `npm run test:sql-bridge`: `sqlite3_progress_handler` によるタイムアウト (`E_TIMEOUT`)・キャンセル (`E_CANCELLED`)
    - `npm run test:inference:browser`: MS Edge 上での Wasm 実推論 (クエリ/画像)
    - `npm run test:inference:node:directml`: 100回連続クエリ、117,362 DMLノード実行、Wasm 完全パリティ
-5. **E2E 実推論テスト**: `npm run test:e2e` により、実推論（Wasm CPU、DirectML GPU、Edge WebGPU）の 3 スイートすべてが合格することを確認する。
+5. **E2E 実推論テスト**: `npm run test:e2e` により、実推論（Wasm CPU、DirectML GPU、Edge WebGPU、仕様契約クエリ）の 4 スイートすべてが合格することを確認する。
 6. **アーキテクチャ依存関係監査**: `npm run depcruise` により、モジュール間の境界違反が 0 件であることを確認する。
 
 テストの入力、期待値、異常系、期限と品質閾値を安易に変更して通過させてはならない。
@@ -25,7 +25,7 @@
 
 ## 2. 同梱試験の範囲
 
-unit は 33 ファイル、E2E は 3 ファイル、統合テストを含め `test/` 配下に配置されている。
+unit は 35 ファイル、E2E は 4 ファイル、統合テストを含め `test/` 配下に配置されている。
 - 列挙: `npm test -- --listTests`
 - 単体テスト実行: `npm test`
 - 単体カバレッジ: `npm run test:ci`
@@ -107,3 +107,7 @@ unit は 33 ファイル、E2E は 3 ファイル、統合テストを含め `te
    - Wasm 推論結果とのコサイン類似度が `0.999999` 以上の一致（Parity）を達成すること。
 3. **ブラウザ WebGPU 実推論 (`test/e2e/browser-inference.test.ts`)**:
    - MS Edge ブラウザ環境で WebGPU アダプター/デバイスが正常に取得され、テキストクエリおよび画像埋め込みの実推論が完了すること。
+4. **仕様契約クエリ実推論 (`test/e2e/vector-contract-query.test.ts`)**:
+   - `VECTOR(768 , 'embeddinggemma-2') STRICT` テーブル定義が透過的に作成されること。
+   - `INSERT INTO documents(id,text_data,embedding) VALUES(1,:text,embedding(:text));` によるベクトル埋め込みの生成と保存。
+   - `SELECT id,text_data FROM documents ORDER BY DISTANCE(embedding,embedding_query(:query)),id LIMIT 3;` によるコサイン距離順セマンティック検索で期待される文書が最上位に抽出されること。
