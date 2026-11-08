@@ -7,7 +7,7 @@
 検証は以下の順序で進行する：
 1. **固定資材の配置点検**: `npm run test:assets` により、全 11 モデル資材および公式成果物の存在と完全性を確認する。
 2. **製品ビルド**: `npm run build` により、推論バンドル・公式 SQLite 資材・製品エントリポイント・型定義が欠落なく生成されることを確認する。
-3. **単体テストスイート**: `npm test` により、33 ファイル・184 テストすべてが PASS することを確認する。
+3. **単体テストスイート**: `npm test` により、35 ファイル・201 テストすべてが PASS することを確認する。
 4. **統合テスト・機能ゲート**:
    - `npm run test:sqlite`: 公式 UDF、未準備短絡、`_svw_meta` 非作成要件、vec1 テーブル動作
    - `npm run test:storage`: `node-file` VFS CRUD、排他ロック、クラッシュ復旧、メタデータ保護
@@ -45,6 +45,7 @@ unit は 33 ファイル、E2E は 3 ファイル、統合テストを含め `te
 | `browser-model.test.ts` | HTTPS/loopback・同 origin、未知 path miss、size/hash、credentials/redirect |
 | `browser-initialize.test.ts` | 永続 cache 先行、offline fetch 0、codec 上限、WebGPU adapter 取得/失敗 |
 | `db-worker.test.ts` | 同期 3072B copy、NULL 送信なし、画像 copy、ID 1..10、cancel/timeout/遅延 |
+| `distribution-contract.test.ts` | npm 配布設定、他 dir パス解決、メインスレッド制約緩和、ブラウザ正式推論接続、TypeScript 型互換契約 |
 | `directml-vision-graph.test.ts` | 固定元 graph、128 変更、出力 size/hash、元 cache 不変、put 拒否 |
 | `directml-runtime.test.ts` | version、4 native 完全 inventory、欠落/余剰/hash/size 不一致拒否 |
 | `embedding-quality.test.ts` | text/image 平均と各件、欠落 modality/重複 ID/異次元/NaN/zero 拒否 |
@@ -71,6 +72,7 @@ unit は 33 ファイル、E2E は 3 ファイル、統合テストを含め `te
 | `release-audit.test.ts` | 全 severity 0 のみ受理、件数不正/不整合/脆弱性を拒否 |
 | `statement-embedding-cache.test.ts` | copy、用途/title/key、10/11 LRU、画像全 bytes、実 32MiB、超過 bypass、NULL/error 非保存 |
 | `statement-lifecycle.test.ts` | ROW 保持/DONE/reset 世代、交互接続/Stmt、close/finalize/error、pause 期限/cancel |
+| `vector-type-and-model-resolution-spec.test.ts` | gemma_embed_* 廃止、VECTOR 型 DDL 解析、[model] 自動解決、動的プロファイル、ゼロダウンロード、遅延初期化 |
 | `verified-cache.test.ts` | 2 prefix だけ、未知 key、毎 read size/hash、put は同内容だけ |
 
 ---

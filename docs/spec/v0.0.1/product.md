@@ -2,7 +2,7 @@
 
 ## 1. 製品境界
 
-製品名は `sqlite-vec1-embeddinggemma2-wasm`、package versionは `0.0.1`。SQLite 3.54.1、公式vec1 0.7、EmbeddingGemma 2のq4 text/visionを一つのnpm形式tarballから利用する。SQLite/vec1は同じWasm instance、SQL接続、transactionで動作する。モデル推論を別DBで事前計算して転記する方式を主実装にしない。
+製品名は `@nojaja/sqlite-vec1-embeddinggemma2-wasm`、package versionは `0.0.1`。公式 `@sqlite.org/sqlite-wasm@3.54.1-build1` に対する完全なドロップイン互換（drop-in replacement）として提供され、利用者が `package.json` の依存先を本パッケージに変更するだけで、SQLite 3.54.1、公式vec1 0.7、EmbeddingGemma 2のq4 text/visionを一つのnpm形式tarballから利用できる。SQLite/vec1は同じWasm instance、SQL接続、transactionで動作する。モデル推論を別DBで事前計算して転記する方式を主実装にしない。
 
 手書き製品・tooling・sampleはTypeScript、設定は `.js`、rootはCommonJS。browserは生成ESM、Nodeは生成CommonJSとESM wrapperを使用する。公式CAPI/VFS hook、限定上流patch、第三者資材、生成物は言語例外。独自SQL parser、tokenizer、距離・推論engineを新設しない。通常のbuild・test・sampleは任意の実験projectを取り外しても動作する。
 
@@ -10,13 +10,17 @@
 
 ## 2. 公開入口と型
 
-| package path | types | 実行入口 |
+公式 `@sqlite.org/sqlite-wasm` と同一のエクスポート構造を提供し、各種 bundler（Vite, Webpack, Parcel, Rsbuild）や Node.js ESM/CJS 環境において追加設定なしで解決可能とする。
+
+| package path | types | 実行入口 / 条件 |
 | --- | --- | --- |
-| `.` | `dist/index.d.ts` | browser条件は `dist/browser/index.mjs`。nodeのimportは `dist/node/index.mjs`、require/defaultは `dist/node/index.js` |
+| `.` | `dist/index.d.ts` (ESM: `dist/index.d.mts`) | `node`: `dist/node/index.js` (CJS) / `dist/node/index.mjs` (ESM)<br>`import`: `dist/index.mjs`<br>`browser`: `dist/browser/index.mjs`<br>`main`: `dist/index.bundle.js` |
 | `./browser` | `dist/index-browser.d.ts` | `dist/browser/index.mjs` |
 | `./node` | `dist/index.d.ts` | import/requireを上と同じく分離 |
 | `./sqlite3.wasm` | なし | `dist/sqlite3.wasm` |
-| `./package.json` | なし | package metadata |
+| `./package.json` | なし | `./package.json` |
+
+公開設定として `"private": false` および `"publishConfig": { "access": "public" }` を定義する。同梱ファイル (`files`) は `dist`, `manifests`, `README.md`, `LICENSE` 等の実在資材に限定し、欠損パスを含めない。
 
 条件exportのtypesを先頭にする。root `main` は `./dist/index.bundle.js`、`types` は `./dist/index.d.ts`、Node engineは `>=24 <25`。CommonJS利用時のinitializerは `require(packageName).default`。Node ESM wrapperはCommonJSのdefaultを明示再exportし、CommonJS namespaceをinitializerとして返さない。
 
@@ -51,15 +55,20 @@ declare function sqlite3InitModule(
 
 `embedding`省略時は公式loaderへ残りのoptionsをそのまま渡す。公式callback、module configuration、Wasm location指定を維持する。main threadでも通常SQL、oo1、capi、vec1、DISTANCEを使える。モデル取得、codec初期化、推論Worker、metadataを作らない。SQL関数名の登録は行うため、NULL短絡と未準備診断は利用できる。
 
-### 3.2 推論有効化
+### 3.2 パス解決契約（外部プロジェクト配置対応）
 
-検証順序は、embedding省略の短絡、Worker環境、option/model object、Node対応matrix、backend、network、base URL、期限。main threadでembeddingを指定した場合はoption内容より先に `E_ENVIRONMENT`。通常SQLのみの省略時に推論向けOS制限を適用しない。
+本パッケージが npm 経由で他プロジェクトの `node_modules/@nojaja/sqlite-vec1-embeddinggemma2-wasm` にインストールされた場合でも安全に稼働するため、パッケージ内アセット（`manifests/embeddinggemma2-q4.json`、`dist/workers/inference-node.js`、`dist/sqlite3.wasm` 等）の解決は呼び出し元の `process.cwd()` ではなく、本パッケージ自身の配置ディレクトリ（`__dirname` または `import.meta.url`）を基準に解決する。
+
+### 3.3 推論有効化およびスレッド制約の緩和
+
+検証順序は、embedding省略の短絡、option/model object、Node対応matrix、backend、network、base URL、期限。
+メインスレッド制約の緩和契約：利用者の利便性のため、メインスレッド（Node.js main thread、ブラウザ window / main thread）での初期化時であっても `E_ENVIRONMENT` で即時拒否せず、バックグラウンド Worker を介して推論を実行可能なアーキテクチャとする。
 
 | 推論を行う環境 | wasm | webgpu | directml |
 | --- | --- | --- | --- |
-| Windows x64 Node.js 24 worker_threads | 既定 | 環境エラー | 明示指定のみ |
-| Linux x64 Node.js 24 worker_threads | 既定 | 環境エラー | 環境エラー |
-| 対応Edge dedicated Worker | 既定 | 明示指定のみ | 環境エラー |
+| Windows x64 Node.js 24 (main / worker_threads) | 既定 | 環境エラー | 明示指定のみ |
+| Linux x64 Node.js 24 (main / worker_threads) | 既定 | 環境エラー | 環境エラー |
+| 対応Edge (Window / dedicated Worker) | 既定 | 明示指定のみ | 環境エラー |
 
 Nodeの他OS・architecture・major版は `E_ENVIRONMENT`。未知backend、`auto`、`gpu`、`dml`は `E_INPUT`。browserのWebGPU対応は実adapter/device取得を必要とし、`navigator.gpu`の存在だけで合格にしない。Chrome、macOS、ARM、NPU、CUDA、複数GPUは保証対象ではない。
 
@@ -67,53 +76,58 @@ Nodeの他OS・architecture・major版は `E_ENVIRONMENT`。未知backend、`aut
 
 初期化期限は600000ms、SQL期限は120000msが既定。いずれも有限数かつ閉区間 `[1,1800000]`。現行validatorは整数に限定しない。nullish値は既定に展開する。範囲外、NaN、Infinityは `E_INPUT`。
 
-公式loader初期化後に推論sessionを準備する。モデル・codecとquery/image warm-upが成功するまでinitializerをresolveしない。推論有効moduleは専用推論Worker/sessionを一組所有し、同moduleの接続で使う。異なるmodule・Workerへ共有しない。同時推論は1。モデル共有poolは提供しない。
+公式loader初期化後に推論sessionを準備する。モデル・codecとquery/image warm-upが成功するまでinitializerをresolveしない。ブラウザ環境においてはダミースタブではなく本物の推論エンジン／ワーカー（`InferenceBrowserController`）と正式接続し、実推論パイプラインを確立する。推論有効moduleは専用推論Worker/sessionを一組所有し、同moduleの接続で使う。異なるmodule・Workerへ共有しない。同時推論は1。モデル共有poolは提供しない。
 
-### 3.3 接続と終了
+### 3.4 接続と終了
 
 vec1は公式SQLite Wasm組み込みの仮想テーブル拡張、embedding系は公式CAPI/oo1拡張で全接続へ登録する。oo1 constructorおよびCAPI step/reset/finalizeを包括して直接CAPI呼出しを取りこぼさない。callbackとfunction pointerはmodule寿命まで保持する。
 
 通常 `db.close()` は同期。全接続をcloseしてから `await sqlite3.embedding.close()` を呼ぶ。生存接続があれば `E_DB_IN_USE` で拒否し、callbackやsessionを先に破棄しない。成功したmodule closeは再呼出し可能。内部登録解除、元capi復元、session/model/port/Worker終了を行う。取得したSAH poolにはDB/session終了後 `pauseVfs()` を呼び、保存データを消さない。Nodeは最後に所有VFSを解除する。
 
-## 4. SQL関数
+## 4. SQL関数と型メタデータ連携 (方式A)
 
-### 4.1 署名
+### 4.1 SQL関数一覧（特定モデル依存関数の全廃）
+
+特定モデルに特化した関数（`gemma_embed_*` 群）は完全に廃止・削除され、モデル非依存の汎用関数のみを提供する。
 
 | 関数 | 登録arity | 用途 |
-| --- | --- | --- |
-| `embedding(text[,model])` | 1、2 | document |
-| `embedding_query(text[,model])` | 1、2 | query |
-| `gemma_embed_query(text[,title])` | 1、2 | query。第2引数はprefixへ使用しない |
-| `gemma_embed_document(text[,title])` | 1、2 | title付きdocument |
-| `gemma_embed_image(bytes,mime)` | 2 | JPEG/PNG画像 |
-| `gemma_model_info()` | 0 | 安全な診断JSON TEXT |
-| `DISTANCE(left,right)` | 2 | vec1由来のcosine distance |
+| --- | :--- | :--- |
+| `embedding(text[, model])` | 1、2 | 文書（document）向け埋め込みベクトルの生成 |
+| `embedding_query(text[, model])` | 1、2 | 検索クエリ（query）向け埋め込みベクトルの生成 |
+| `DISTANCE(left, right)` | 2 | 2つの Float32 ベクトル間のコサイン距離 (0〜2) |
 
-generic関数のmodel省略は厳密に `embeddinggemma-2`。model指定時は同じ文字列だけを受理する。NULL、数値、空文字、大小文字違い、別名は `E_INPUT`。model検証を本文NULLより先に行う。登録されていないarityはSQLite標準のarity error。
+### 4.2 方式A: `VECTOR(dim, 'model')` 型定義と自動モデル判断
 
-text系はmodel検証後、本文NULLなら推論なし・cache登録なしでNULL。非NULL本文の型・byte長・空白・NULを検証してから準備状態を確認する。未準備なら `E_EMBEDDING_NOT_READY`。SQL画像関数は `Uint8Array` とstring MIMEを先に要求し、NULL画像/MIMEも `E_INPUT`。内部engineの画像NULL短絡をSQL登録関数の仕様と混同しない。
+#### 4.2.1 DDL 構文とスキーマ解析
+SQLite の動的型付けアフィニティを活かし、テーブル定義時にベクトル型およびメタデータを定義する：
+```sql
+CREATE TABLE items (
+  id INTEGER PRIMARY KEY,
+  content TEXT,
+  embedding VECTOR(512, 'ruri-v3')
+);
+```
+- ライブラリは `CREATE TABLE` 実行時または接続初期化時に `sqlite_schema` を読み取り、テーブル名・カラム名・次元数・モデル名のマッピング辞書を構築・保持する。
 
-text/image/model-infoの登録flagsは `SQLITE_UTF8 | SQLITE_DIRECTONLY`。DETERMINISTIC、INNOCUOUSを設定しない。view、trigger、generated column、expression index等からの間接推論を認めず、明示SQLとtransactionを使う。cache最適化のためにflagsを偽装しない。
+#### 4.2.2 `[model]` パラメータの自動解決優先順位
+SQL 文中で `embedding(text)` や `embedding_query(text)` の第2引数 `[model]` が省略された場合、以下の優先順位で自動解決される：
 
-### 4.2 入出力
+1. **明示指定**: `embedding(text, 'model_name')` が渡されている場合は最優先で使用。
+2. **カラムコンテキスト（INSERT / UPDATE）**: 実行中の SQL 文を解析し、代入先カラムが `VECTOR(dim, 'model')` として定義されていればそのモデル名を自動採用。
+3. **DB 内の一意モデル**: データベース内に定義されている `VECTOR` 型のモデルが 1 種類のみの場合、すべての省略呼び出しでそのモデルを自動採用。
+4. **デフォルトモデル設定**: アプリ初期化時に指定された `defaultModel` を採用。
+5. いずれにも該当しない場合は `E_MODEL_UNBOUND` エラーを送出。
 
-query prefixは `task: search result | query: {body}`、document prefixは `title: {title-or-none} | text: {body}`。親SQLやDISTANCEの有無から用途を推測しない。文書titleのundefined/NULL/空文字だけをnoneへ展開し、空白titleを勝手にtrimしない。
+### 4.3 距離関数 `DISTANCE(left, right)`
 
-本文は未加工Unicode文字列のUTF-8で1MiB以下、空・空白のみ・NULは禁止。titleは1024 bytes以下。数値/BLOBの暗黙変換、Unicode正規化、小文字化、chunk化、切詰めを行わない。固定tokenizerのall_special_tokensを入力に含めない。prefix・画像soft token込みの最終input_idsが2048を超えたら `E_TOKEN_LIMIT`。2048は受理する。
+どちらかが NULL なら NULL。その他は両方 BLOB、同一バイト長（`dim * 4` バイト）、有限 Float32 配列を要求し、不適合は `E_INPUT`。
+コサイン距離計算式: `1 - dot(left, right) / (norm(left) * norm(right))`。同一 0、直交 1、逆向き 2 を返す。入力ベクトルの次元数は 512, 768, 256 など登録モデルの次元数に柔軟に対応する。
 
-出力は独立所有のUint8Array。headerなし、768個のLE IEEE754 Float32、3072 bytes。モデルのFloat32 `sentence_embedding` とshape `[1,768]`を要求し、last_hidden_state等で代用しない。Float64累積normが有限かつ `>1e-12` であることを確認し、各値をnormで除してLE Float32へ格納する。保存norm誤差は `abs(norm-1)<=1e-5`。非finite・shape違い・ゼロは `E_EMBEDDING_VALUE`。query/document/imageは同じ論理embedding空間を使う。
+### 4.4 動的モデルプロファイルと外部資材（ゼロダウンロード）
 
-### 4.3 距離
-
-どちらかがNULLならNULL。その他は両方BLOB、各3072 bytes、768 finite Float32、正のnormを要求し、不適合は `E_INPUT`。非正規化入力も許可する。各normをdouble精度で求め、正規化したFloat32一時配列を公式 `vec1CosDist` へ渡す。極小約 `1e-40`・極大約 `3e38` をFloat32の積のoverflow/underflowで拒否しない。
-
-意味は `1-dot(left,right)/(norm(left)*norm(right))`。同一0、直交1、逆向き2を許容誤差内で返す。小さい順が近傍。入力BLOBのモデル由来は距離関数では分からず、保存metadataと利用者の入力管理で空間混在を防ぐ。NULLのsort順はSQLite標準のまま。
-
-### 4.4 診断
-
-model-infoはJSON TEXTで、`ready`、`model:"embeddinggemma-2"`、累積 `functionCalls`、cacheの `hit,miss,eviction,actualInference,entries,bytes` を含む。有効sessionでは元modelId、revision、fingerprint、q4、dimension、backend、runtime/version、executionProvider等のREADY情報も含む。未準備ではready=false、全cache counter=0で、診断のためにモデルを取得しない。
-
-functionCallsはtext/imageのUDF評価回数でNULLや入力エラーも計数し、model-info自身は計数しない。actualInferenceはstatement cacheのmissからinferを呼んだ回数で、成功結果だけの数ではない。warm-upをSQL counterへ混ぜない。本文、画像、SQL、BLOB値、token ID、絶対pathを診断へ出さない。
+- **事前定義不要**: ライブラリ内部に特定モデルをハードコードせず、アプリ側が利用時に任意の ONNX モデル（ruri-v3, bekko, Gemma 等）のパスと設定を動的登録可能。
+- **自動ダウンロードの完全排除**: ライブラリ自身による外部ネットワーク通信（Hugging Face 等からの自動フェッチ）は一切行わず、アプリ側で事前に配置されたローカルファイル資材のみを読み込む。
+- **遅延初期化**: `embedding` 関数が実際に SQL で評価されるまで推論 Worker / ONNX Runtime の起動を行わず、通常 SQL や vec1 仮想テーブルはゼロオーバーヘッドで即座に動作する。
 
 ## 5. 実行内LRU
 

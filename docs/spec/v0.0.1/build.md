@@ -93,20 +93,23 @@ esbuild で CJS 形式でバンドルする際、以下の設定を施す：
 
 ## 5. 型定義ファイルの生成
 
-TypeScript コンパイラ（`tsc`）を用いて、型宣言ファイルを生成する。
-- 実行コマンド: `npx tsc --project tsconfig.json --emitDeclarationOnly --declaration --declarationDir dist`
+公式 `@sqlite.org/sqlite-wasm@3.54.1-build1` の型定義（`index.d.mts`）を基盤とし、TypeScript コンパイラおよび型合成スクリプトを用いて型宣言ファイルを生成する。
+- 必須型エクスポート: 公式の `Sqlite3Static`, `Database`, `PreparedStatement`, `CAPI`, `SqlValue`, `BindingSpec`, `sqlite3Worker1Promiser` および製品固有の `ProductSqlite3`, `ProductInitOptions`, `EmbeddingOptions`, `EmbeddingControl`
 - 生成成果物:
   - `dist/index.d.ts` (Node / メイン公開型定義)
+  - `dist/index.d.mts` (ESM 向け型定義)
   - `dist/index-browser.d.ts` (ブラウザ公開型定義)
 
 ---
 
-## 6. 配布成果物構成
+## 6. 配布成果物構成および npm 設定
 
-最終配布パッケージ（npm tarball）に含まれるファイル構成：
-- `dist/`: バンドル済み JavaScript、Wasm バイナリ、型定義
-- `manifests/`: `embeddinggemma2-q4.json`
-- `licenses/`: 各コンポーネントのライセンスファイル
-- `THIRD_PARTY_NOTICES.md`: サードパーティ著作権表示
-- `README.md`: 利用ドキュメント
-- `package.json`: エクスポート定義およびメタデータ
+最終配布パッケージ（npm tarball）に含まれるファイル構成および npm 設定：
+- パッケージ名: `@nojaja/sqlite-vec1-embeddinggemma2-wasm`
+- 公開設定: `"private": false`、`"publishConfig": { "access": "public" }`
+- 同梱ファイル (`files`):
+  - `dist/`: バンドル済み JavaScript、Wasm バイナリ、型定義 (`index.d.ts`, `index.d.mts` 等)
+  - `manifests/`: `embeddinggemma2-q4.json`
+  - `README.md`: 利用ドキュメント
+  - `LICENSE`: ライセンス表示
+  - `package.json`: 公式互換エクスポート定義およびメタデータ

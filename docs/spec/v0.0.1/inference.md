@@ -1,7 +1,22 @@
-# v0.0.1 推論・資材取得・Worker仕様
+# v0.0.1 推論・モデルプロファイル・Worker仕様
 
-## 1. 固定モデル
+## 1. モデルプロファイルと資材配置戦略
 
+本パッケージは特定モデル（EmbeddingGemma-2）への固定を廃止し、任意の ONNX 埋め込みモデル（EmbeddingGemma-2, ruri-v3, bekko 等）を動的に利用可能なモデルプロファイル機構を採用する。
+また、npm パッケージ内にモデル資材（約300MB）を含めず、外部通信による自動ダウンロードも一切行わない。モデル資材は本ライブラリを利用するアプリケーション側が事前にローカル領域へ配置し、その配置パスを指定して利用する（ゼロダウンロード・完全オフライン動作）。
+
+### 1.1 動的モデルプロファイル (ModelProfileDefinition)
+
+ライブラリ内部にモデルのハードコードを持たず、アプリ側から動的に設定を注入する：
+- `name`: モデル識別名（例: `'ruri-v3'`, `'embeddinggemma-2'`, `'bekko-v1'`）
+- `path`: アプリ側で事前配置されたローカルモデルディレクトリパス
+- `dimension`: 埋め込み次元数（例: 256, 512, 768）。省略時は `config.json` 等から自動検出可能。
+- `normalize`: コサイン類似度向けの L2 正規化（既定: `true`）
+- `prefix`: クエリ用・文書用のプレフィックス定義（モデル仕様に応じた整形）
+
+### 1.2 参照モデル定義 (EmbeddingGemma-2)
+
+EmbeddingGemma-2 を利用する場合の参照プロファイル：
 公開model名は `embeddinggemma-2`、元model IDは `google/embeddinggemma-2`、ONNX repositoryは `onnx-community/embeddinggemma-2-ONNX`、revisionは `daa72c51243991dfcaf9f9137d2c573d8f7790c0`。text/visionのweight-only q4、FP32 activation、768次元、audio無効。FP16/q4f16/q8や別revisionへ差し替えて成功扱いにしない。
 
 製品manifest `manifests/embeddinggemma2-q4.json` はschemaVersion=1、上記modelId/repository/revision、artifactSetHash、fingerprint、license、profile、assetsを持つ。artifactSetHashは `edc288bfd9366727abe6200cf6db45d844aac338c9055f359308334567ba661e`、論理空間fingerprintは `5e730f96377d880c7ca94c9ddc9cd5f600e5237e106f5e4dc7d9448140026ac7`。これらはモデル集合/保存空間の識別契約であり、SQLiteやORTバイナリ自体の合否digestではない。
