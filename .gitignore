@@ -147,3 +147,10 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+
+downloads/
+model/
+.build/
+artifacts/
+docs/typedoc-md/

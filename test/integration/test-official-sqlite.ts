@@ -1,0 +1,43 @@
+import assert from "node:assert/strict";
+import { resolve } from "node:path";
+import type { ProductInitOptions, ProductSqlite3 } from "../../src/official/types";
+
+/**
+ * 処理名: 公式製品adapter検証
+ * 処理概要: 実moduleへauto-extensionを登録し、通常SQLと未準備UDFを確認する。
+ * 実装理由: 別SQLiteやmockで新入口の接続登録を代替しないため。
+ * @returns 検証完了。
+ */
+async function testOfficialSqlite(): Promise<void> {
+  const module = require(resolve("dist/node/index.js")) as { default: (options?: ProductInitOptions) => Promise<ProductSqlite3> };
+  const sqlite3 = await module.default();
+  const database = new sqlite3.oo1.DB(":memory:");
+  try {
+    assert.equal(database.selectValue("SELECT sqlite_version()"), "3.54.1");
+    assert.equal(database.selectValue("SELECT vec1_info()"), "version 0.7 (Scalar, single-threaded)");
+    assert.equal(database.selectValue("SELECT embedding(NULL)"), null);
+    assert.equal(database.selectValue("SELECT embedding_query(NULL, 'embeddinggemma-2')"), null);
+    assert.throws(() => database.selectValue("SELECT embedding(NULL, 'unknown')"), /E_INPUT/u);
+    assert.throws(() => database.selectValue("SELECT embedding('body')"), /E_EMBEDDING_NOT_READY/u);
+    assert.throws(() => database.selectValue("SELECT embedding()"), /wrong number/u);
+    assert.throws(() => database.selectValue("SELECT embedding('body','embeddinggemma-2','query')"), /wrong number/u);
+    assert.equal(database.selectValue("SELECT count(*) FROM sqlite_schema WHERE name='_svw_meta'"), 0);
+    database.exec("BEGIN; CREATE TABLE ordinary(value); INSERT INTO ordinary VALUES(1); COMMIT");
+    assert.equal(database.selectValue("SELECT value FROM ordinary"), 1);
+    database.exec("CREATE VIRTUAL TABLE vectors USING vec1(vector); INSERT INTO vectors(cmd,arg) VALUES('rebuild','{\"index\":\"flat\",\"distance\":\"cos\"}')");
+    const vector = new Uint8Array(3072); new DataView(vector.buffer).setFloat32(0, 1, true);
+    database.exec({ sql: "INSERT INTO vectors(rowid,vector) VALUES(1,?)", bind: [vector] });
+    assert.ok(Math.abs(Number(database.selectValue("SELECT DISTANCE(?,?)", [vector, vector]))) < 1e-6);
+    database.exec({ sql: "UPDATE vectors SET vector=? WHERE rowid=1", bind: [vector] });
+    database.exec("DELETE FROM vectors WHERE rowid=1");
+    assert.equal(database.selectValue("SELECT count(*) FROM vectors"), 0);
+    assert.equal(database.selectValue("PRAGMA quick_check"), "ok");
+    const info = JSON.parse(String(database.selectValue("SELECT gemma_model_info()"))) as { ready: boolean };
+    assert.equal(info.ready, false);
+  } finally { database.close(); }
+  await sqlite3.embedding.close();
+  await sqlite3.embedding.close();
+  console.log(JSON.stringify({ stage: "official-product-sqlite", status: "passed", embedding: "disabled", modelRequests: 0 }));
+}
+
+testOfficialSqlite().catch((failure: unknown) => { console.error(failure); process.exitCode = 1; });
