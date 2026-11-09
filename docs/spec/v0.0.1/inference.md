@@ -2,8 +2,11 @@
 
 ## 1. モデルプロファイルと資材配置戦略
 
-本パッケージは特定モデル（EmbeddingGemma-2）への固定を廃止し、任意の ONNX 埋め込みモデル（EmbeddingGemma-2, ruri-v3, bekko 等）を動的に利用可能なモデルプロファイル機構を採用する。
-また、npm パッケージ内にモデル資材（約300MB）を含めず、外部通信による自動ダウンロードも一切行わない。モデル資材は本ライブラリを利用するアプリケーション側が事前にローカル領域へ配置し、その配置パスを指定して利用する（ゼロダウンロード・完全オフライン動作）。
+本パッケージは、標準サポートされる参照モデル（EmbeddingGemma-2）と、アプリケーション主導で任意の ONNX 埋め込みモデル（ruri-v3, bekko 等）を動的に利用可能なモデルプロファイル機構の双方に対応する。
+また、npm パッケージ配布物（tarball）内には大容量のモデル資材（約300MB）を含めない（ゼロバンドル）。資材の配備およびネットワーク利用は以下の2系統を提供する：
+
+1. **参照モデル（EmbeddingGemma-2）**: 組込みの公式初期化（`initialize({ embedding: ... })`）において、`network: "allow"` での安全なストリーム HTTP 取得による永続キャッシュ構築、または `network: "offline"` での完全ローカルキャッシュ運用（外部通信完全遮断）に対応する。事前配置用ツールとして `scripts/download-assets.mjs` も提供される。
+2. **動的モデルプロファイル（任意ローカルモデル）**: アプリケーション側がローカルに任意モデルを事前配置し、`registerEmbeddingExtension` 経由で推論を統合する（完全オフライン・ゼロダウンロード動作）。
 
 ### 1.1 動的モデルプロファイル (ModelProfileDefinition)
 
@@ -23,7 +26,7 @@ EmbeddingGemma-2 を利用する場合の参照プロファイル：
 
 profileはaudio=false、dtype=q4、dimension=768、preprocessingVersion=`embeddinggemma2-input-v1`、prefixVersion=`embeddinggemma2-prefix-v1`、normalizationVersion=`l2-f64-le-f32-v1`、inputContractVersion=1。image設定は本書第3節。backendは論理fingerprintを変えない。
 
-### 1.1 必須11資材
+### 1.3 必須11資材
 
 pathはmanifest論理path。配置元がflatな場合も論理pathへ対応付ける。assets配列は以下の順で固定し、各行にrole/mime/license=`apache-2.0`を付ける。graph/weightsはoctet-stream、JSONはapplication/json、templateはtext/plain。
 

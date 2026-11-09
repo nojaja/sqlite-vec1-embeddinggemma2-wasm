@@ -131,6 +131,11 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts", () => {
       // docs/spec/v0.0.1/product.md 3.3:
       // 公式loader初期化後に推論sessionを準備する。モデル・codecとquery/image warm-upが成功するまでinitializerをresolveしない。
       // SQL評価時まで推論Worker起動を遅延させる方式（遅延初期化）ではなく、初期化完了時点で推論セッション・warm-upが完了している契約
+      /**
+       * 処理名: 初期化ライフサイクル状態。
+       * 処理概要: 公式loader初期化および推論セッション準備・warm-upの状態を保持する。
+       * 実装理由: warm-up完了前に初期化が解決されない契約を型安全に検証するため。
+       */
       interface InitializationLifecycle {
         loaderReady: boolean;
         sessionPrepared: boolean;
@@ -138,6 +143,13 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts", () => {
         initializerResolved: boolean;
       }
 
+      /**
+       * 処理名: 初期化完了判定。
+       * 処理概要: loaderReady・sessionPrepared・warmupCompletedがすべて満たされているか検証する。
+       * 実装理由: モデル・codecとquery/image warm-upが成功するまでinitializerをresolveしない契約を検証するため。
+       * @param state - 初期化ライフサイクル状態。
+       * @returns 初期化完了とみなせる場合はtrue。
+       */
       function canResolveInitializer(state: InitializationLifecycle): boolean {
         // モデル・codecとquery/image warm-upが成功するまでinitializerをresolveしない
         return state.loaderReady && state.sessionPrepared && state.warmupCompleted;

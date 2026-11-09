@@ -23,10 +23,11 @@
 
 ### 2.3 C レベル限定互換変更
 1. **vec1 savepoint 再入保護**: `Vec1Writer *pWriter = pTab->pWriter` を退避し、NULL なら `SQLITE_OK`、`pTab->pWriter = 0` を `vec1WriterFinish(pWriter, ...)` より先に行う。
-2. **C 言語版 DISTANCE 関数**: 2つの 3072 バイト Float32 BLOB を受け取り、倍精度 L2 ノルム正規化を行った上で `vec1CosDist` へ委譲するスカラー関数 `DISTANCE(left, right)` を静的登録。
+2. **C 言語版 DISTANCE 関数**: 2つの同一バイト長（`dim * 4` バイト。256, 512, 768 次元など各モデルの次元数に対応）の有限 Float32 BLOB を受け取り、倍精度 L2 ノルム正規化を行った上で `vec1CosDist` へ委譲するスカラー関数 `DISTANCE(left, right)` を静的登録（いずれかが NULL の場合は NULL、不適合時は `E_INPUT`）。
 3. **JS capi sqlite3_bind_text**: Array 判定・連結の誤変数 `pMem` を `text` へ訂正し、文字列 allocation は `allocCString(text, true)` でポインタと長さを取得。
 4. **oo1 built-in trace / step 警告**: 固定 `SQLITE_TRACE_EVENT` とカウンタ、ステップ失敗警告は `SQLITE_STEP_FAILED` とエラーコードのみをログ出力。
 5. **OPFS void 参照**: 上流の未使用 local/catch/flags/lock を void 参照で安全に処理。
+6. **STRICT テーブルにおける VECTOR 型ネイティブ受容**: `sqlite3.c` のカラム型検証およびアフィニティ解決関数（`sqlite3ColumnType()` 等）に限定パッチを適用。型名先頭が `VECTOR`（case-insensitive）である宣言（例: `VECTOR(768, 'embeddinggemma-2')`）を `SQLITE_AFF_BLOB` アフィニティとして解決し、`STRICT` テーブルの型バリデーションを通過させる。これにより、TypeScript 側の DDL 前処理や文字列置換を不要とし、低レベル CAPI を含む全実行経路で `VECTOR` 型指定の DDL をネイティブに受理・実行可能とする。
 
 ### 2.4 ビルドコマンドと生成成果物
 - `./configure --disable-readline --disable-tcl`
@@ -74,7 +75,7 @@
 
 推論ビルドは、推論 Worker が利用するバイナリおよびライブラリを `dist/` 配下に構成する。
 
-### 3.1 ORT ランタイムおよび画像コーデック Wasm の配置
+### 4.1 ORT ランタイムおよび画像コーデック Wasm の配置
 - `node_modules/onnxruntime-web/dist/` より、以下のファイルを `dist/ort/` へ配置する：
   - `ort-wasm-simd-threaded.jsep.mjs`
   - `ort-wasm-simd-threaded.jsep.wasm`
@@ -85,7 +86,7 @@
   - `png.wasm` (`@jsquash/png`)
   - `resize.wasm` (`@jsquash/resize`)
 
-### 3.2 Transformers.js のパッチ適用とバンドル
+### 4.2 Transformers.js のパッチ適用とバンドル
 `node_modules/@huggingface/transformers` を作業領域にコピーし、以下のパッチを適用してバンドルを生成する：
 
 1. **Portable パッチ (`patches/transformers-portable.patch`)**:
@@ -95,7 +96,7 @@
 2. **DirectML パッチ (`patches/transformers-directml.patch`)**:
    - `Symbol.for('onnxruntime')` 注入時にも `supportedDevices.push('dml', 'cpu'); defaultDevices = ['dml'];` を設定し、DirectML デバイス認識を有効化。
 
-### 3.3 生成される推論バンドル
+### 4.3 生成される推論バンドル
 - `dist/vendor/transformers-portable-node.js`: Node.js Wasm 向け CJS バンドル
 - `dist/vendor/transformers-portable.mjs`: ブラウザ Wasm/WebGPU 向け ESM バンドル (Node builtin モジュールを空スタブ解決)
 - `dist/vendor/transformers-directml-node.js`: Node.js DirectML 向け CJS バンドル (`onnxruntime-node` は external 解決)
@@ -104,7 +105,7 @@
 
 ## 5. 製品パッケージバンドル仕様 (`scripts/build/package.ts`)
 
-### 4.1 エントリポイント構成
+### 5.1 エントリポイント構成
 
 | 出力ファイル | フォーマット | ターゲット環境 | 備考 |
 | :--- | :---: | :---: | :--- |
@@ -115,14 +116,14 @@
 | `dist/workers/inference-node.js` | CJS | Node Worker | Atomics 同期ブリッジおよび推論実行 |
 | `dist/workers/inference-browser.mjs`| ESM | ブラウザ Worker | WebGPU adapter 注入および推論実行 |
 
-### 4.2 CJS 出力における `import.meta.url` の解決
+### 5.2 CJS 出力における `import.meta.url` の解決
 公式 `sqlite3-node.mjs` は内部で `createRequire(import.meta.url)` を使用して Wasm バイナリ等を解決する。
 esbuild で CJS 形式でバンドルする際、以下の設定を施す：
 - `define: { "import.meta.url": "__svw_import_meta_url" }`
 - `banner: { js: "const __svw_import_meta_url = require('url').pathToFileURL(__filename).href;" }`
 これにより、CJS 環境下でも `import.meta.url` が常に有効な `file:///` URL として動作する。
 
-### 4.3 Wasm ファイル配置と自動検出 (`locateFile`)
+### 5.3 Wasm ファイル配置と自動検出 (`locateFile`)
 `dist/sqlite3.wasm` はパッケージルートおよび各エントリポイントから参照される。
 `src/official/node.ts` の `locateFile` オプションにより、カレントディレクトリ、`dist/`、またはモジュール相対パスから実在する絶対パスを自動検出して SQLite ランタイムへ渡す。
 

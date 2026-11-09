@@ -99,7 +99,7 @@ vec1 は C の static auto-extension（`sqlite3_wasm_extra_init.c` による `sq
 ### 4.2 方式A: `VECTOR(dim, 'model')` 型定義と自動モデル判断
 
 #### 4.2.1 DDL 構文とスキーマ解析
-SQLite の動的型付けアフィニティおよび DDL 透過インターセプトを活かし、テーブル定義時にベクトル型およびメタデータを定義する：
+SQLite の動的型付けアフィニティおよび SQLite C コアへの限定上流パッチを活かし、テーブル定義時にベクトル型およびメタデータをネイティブに定義する：
 ```sql
 CREATE TABLE documents (
   id INTEGER PRIMARY KEY,
@@ -107,27 +107,45 @@ CREATE TABLE documents (
   embedding VECTOR(768 , 'embeddinggemma-2')
 ) STRICT;
 ```
-- ライブラリは `CREATE TABLE` 実行時または接続初期化時に DDL をインターセプト・解析し、テーブル名・カラム名・次元数・モデル名のマッピング辞書を構築・保持する。内部的には SQLite のネイティブストレージ層（`STRICT` 指定テーブルを含む）へ透過的に適合させる。
+
+##### 独自SQL parser禁止の厳守と C 言語パッチ・公式APIによるメタデータ取得方式
+「1. 製品境界」に定める独自SQL parser新設禁止を厳守し、テーブル定義やスキーマの解析にフルASTを構築する独自構文解析器を用いない。SQLite C 言語レベルの限定パッチおよび公式機構・CAPI機能に限定して実装する：
+1. **SQLite C レベル限定パッチによる STRICT テーブルの VECTOR 型ネイティブ受容**:
+   - SQLite の `STRICT` テーブルは既定で `INT, INTEGER, REAL, TEXT, BLOB, ANY` 以外の未知の型名を構文エラーとして拒否する。
+   - 本製品では SQLite C ソース（`sqlite3.c`）のカラム型検査・アフィニティ解決関数（`sqlite3ColumnType()` 等）に限定上流パッチを適用し、`VECTOR` で始まる型名を `SQLITE_AFF_BLOB` アフィニティとして直接受理させる（[build.md](build.md#23-c-レベル限定互換変更) 参照）。
+   - これにより、TypeScript 側で DDL 文字列の再パースや正規表現によるキーワード置換を行うことなく、SQLite 公式 Lemon パーサーが `VECTOR(...)` をネイティブに直接パース・受理する。低レベル CAPI（`sqlite3_exec` 等）から直接発行された DDL も完全に透過的に機能する。
+2. **公式カタログおよびPRAGMAによるメタデータ抽出**:
+   - テーブル作成時および接続初期化時、ライブラリは `sqlite_schema`（旧 `sqlite_master`）テーブルまたは `PRAGMA table_info(tableName)` / `PRAGMA table_xinfo(tableName)` を実行し、SQLite 自身が構文解析・保持した正規化カラム名と宣言型（`type` 文字列、例: `VECTOR(768, 'embeddinggemma-2')`）を取得する。
+3. **型定義トークンの抽出（非パーサー）**:
+   - 取得した宣言型文字列に対してのみ、単純な型パラメータ抽出正規表現（例: `/^VECTOR\s*\(\s*(\d+)(?:\s*,\s*['"]?([^'")]+)['"]?)?\s*\)$/i`）を適用して次元数 `dim` とモデル名 `model` を抽出する。これはSQL文の構文木解析ではなく、SQLite公式パーサーが抽出済みの型文字列のデコードに限定される。
 
 #### 4.2.2 `[model]` パラメータの自動解決優先順位
 SQL 文中で `embedding(text)` や `embedding_query(text)` の第2引数 `[model]` が省略された場合、以下の優先順位で自動解決される：
 
 1. **明示指定**: `embedding(text, 'model_name')` が渡されている場合は最優先で使用。
-2. **カラムコンテキスト（INSERT / UPDATE）**: 実行中の SQL 文を解析し、代入先カラムが `VECTOR(dim, 'model')` として定義されていればそのモデル名を自動採用。
+2. **カラムコンテキスト（INSERT / UPDATE）**: 実行中の代入先カラムが `VECTOR(dim, 'model')` として定義されていればそのモデル名を自動採用。
 3. **DB 内の一意モデル**: データベース内に定義されている `VECTOR` 型のモデルが 1 種類のみの場合、すべての省略呼び出しでそのモデルを自動採用。
 4. **デフォルトモデル設定**: アプリ初期化時に指定された `defaultModel` を採用。
 5. いずれにも該当しない場合は `E_MODEL_UNBOUND` エラーを送出。
+
+##### カラムコンテキスト解決における独自パーサー排除方式
+実行中の SQL 文を解析するにあたり、独自 SQL パーサーによる構文木（AST）解析は新設しない。以下の方式で代入先カラムを特定する：
+- **SQLite 公式 Authorizer（`sqlite3_set_authorizer`）の活用**:
+  - SQLite が SQL 文をコンパイル（`sqlite3_prepare_v2`）する際、SQLite 本体の Lemon パーサーが各操作文脈を認可コールバックへ通知する。
+  - `SQLITE_INSERT`（テーブル名）、`SQLITE_UPDATE`（テーブル名、カラム名）、および `SQLITE_FUNCTION`（関数名）のアクション通知シーケンスを内部監視することで、独自に文法解析を行うことなく、SQLite 自身が確定した対象テーブル・カラムのコンテキストを取得する。
+- **曖昧時のフォールバック原則**:
+  - サブクエリ、複雑な式、CTE 等により SQLite の標準コンテキスト通知から代入先カラムが一意に特定できない文脈では、無理な独自構文推定を行わず、後続の優先順位（「3. DB 内の一意モデル」「4. デフォルトモデル設定」）へフォールバックする。確定できない場合は安全に `E_MODEL_UNBOUND` を送出する。
 
 ### 4.3 距離関数 `DISTANCE(left, right)`
 
 どちらかが NULL なら NULL。その他は両方 BLOB、同一バイト長（`dim * 4` バイト）、有限 Float32 配列を要求し、不適合は `E_INPUT`。
 コサイン距離計算式: `1 - dot(left, right) / (norm(left) * norm(right))`。同一 0、直交 1、逆向き 2 を返す。入力ベクトルの次元数は 512, 768, 256 など登録モデルの次元数に柔軟に対応する。
 
-### 4.4 動的モデルプロファイルと外部資材（ゼロダウンロード）
+### 4.4 動的モデルプロファイルと推論ライフサイクル
 
-- **事前定義不要**: ライブラリ内部に特定モデルをハードコードせず、アプリ側が利用時に任意の ONNX モデル（ruri-v3, bekko, Gemma 等）のパスと設定を動的登録可能。
-- **自動ダウンロードの完全排除**: ライブラリ自身による外部ネットワーク通信（Hugging Face 等からの自動フェッチ）は一切行わず、アプリ側で事前に配置されたローカルファイル資材のみを読み込む。
-- **遅延初期化**: `embedding` 関数が実際に SQL で評価されるまで推論 Worker / ONNX Runtime の起動を行わず、通常 SQL や vec1 仮想テーブルはゼロオーバーヘッドで即座に動作する。
+- **動的モデルプロファイル（任意モデル対応）**: ライブラリ組込みの参照モデル（EmbeddingGemma-2）に加え、アプリ側がローカル配置した任意の ONNX モデル（ruri-v3, bekko 等）のプロファイル定義（`ModelProfileDefinition`）および推論Workerを `registerEmbeddingExtension` 経由で動的にバインド可能。独自モデル運用時はライブラリ自身による外部通信を行わない完全オフライン・ゼロダウンロード動作となる。
+- **参照モデルの二系統ネットワーク制御**: 公式初期化（`initialize({ embedding: ... })`）では、`network: "allow"` 時は指定 `baseUrl` または既定の Hugging Face 固定リビジョンから固定11資材をストリーム取得して永続キャッシュを構築し、`network: "offline"` 時は外部通信を一切遮断してローカルキャッシュのみを利用する（不足時は `E_MODEL_CACHE_MISS`）。
+- **推論セッション先行準備と省略時ゼロオーバーヘッド（Eager Session Warm-up）**: `embedding` オプション省略時は推論 Worker / ONNX Runtime の起動を行わず通常 SQL や vec1 仮想テーブルが即座に動作する（3.1）。一方、`embedding` 有効化時はクエリ実行時の遅延や予期せぬ失敗を排除するため、遅延初期化を行わず、初期化フェーズで即座に推論 Worker / セッションを立ち上げ、query および image の warm-up 完了まで初期化を resolve しない契約（3.3）とする。
 
 ## 5. 実行内LRU
 
