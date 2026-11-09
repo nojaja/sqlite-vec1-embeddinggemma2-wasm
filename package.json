@@ -17,7 +17,7 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "browser": "./dist/browser/index.mjs",
+      "browser": "./dist/index-browser.mjs",
       "node": {
         "import": "./dist/node/index.mjs",
         "require": "./dist/node/index.js",
@@ -25,7 +25,7 @@
       },
       "default": "./dist/node/index.js"
     },
-    "./browser": { "types": "./dist/index-browser.d.ts", "default": "./dist/browser/index.mjs" },
+    "./browser": { "types": "./dist/index-browser.d.ts", "default": "./dist/index-browser.mjs" },
     "./node": { "types": "./dist/index.d.ts", "import": "./dist/node/index.mjs", "require": "./dist/node/index.js", "default": "./dist/node/index.js" },
     "./sqlite3.wasm": "./dist/sqlite3.wasm",
     "./package.json": "./package.json"

@@ -9,7 +9,7 @@ import type { ProductInitOptions, ProductSqlite3 } from "../../../src/official/t
  */
 async function runOfficialBrowserOwner(event: MessageEvent<{ backend: "wasm" | "webgpu"; network: "allow" | "offline" }>): Promise<void> {
   const root = location.origin;
-  const module = await import(root + "/dist/browser/index.mjs") as { default: (options?: ProductInitOptions) => Promise<ProductSqlite3> };
+  const module = await import(root + "/dist/index-browser.mjs") as { default: (options?: ProductInitOptions) => Promise<ProductSqlite3> };
   const sqlite3 = await module.default({ embedding: { model: { network: event.data.network, baseUrl: root + "/models/fixed/" }, backend: event.data.backend } });
   if (!sqlite3.installOpfsSAHPoolVfs) throw new Error("installOpfsSAHPoolVfs not available");
   const pool = await sqlite3.installOpfsSAHPoolVfs({ name: "official-product-test", directory: "/official-product-test", clearOnInit: false, preserveOnInitFailure: true });

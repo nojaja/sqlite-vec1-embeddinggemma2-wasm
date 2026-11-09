@@ -90,7 +90,6 @@ async function main(): Promise<void> {
   // 3. 各エントリーポイントのバンドル
   console.log("[3/5] Bundling product entry points and samples...");
   fs.mkdirSync(path.resolve(distDir, "node"), { recursive: true });
-  fs.mkdirSync(path.resolve(distDir, "browser"), { recursive: true });
   fs.mkdirSync(path.resolve(distDir, "workers"), { recursive: true });
   fs.mkdirSync(path.resolve(distDir, "samples/node"), { recursive: true });
   fs.mkdirSync(path.resolve(distDir, "samples/browser"), { recursive: true });
@@ -146,10 +145,10 @@ async function main(): Promise<void> {
   });
   metafiles.push(r3.metafile);
 
-  // 3.4 dist/browser/index.mjs (ESM)
+  // 3.4 dist/index-browser.mjs (ESM)
   const r4 = await esbuild.build({
     entryPoints: ["src/index-browser.ts"],
-    outfile: path.resolve(distDir, "browser/index.mjs"),
+    outfile: path.resolve(distDir, "index-browser.mjs"),
     bundle: true,
     platform: "browser",
     format: "esm",
