@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import initialize from "../../src/official/node";
-import { populateOfficialSample, searchOfficialSample, mutateOfficialSample } from "../official-scenario";
+import { populateOfficialSample, searchOfficialSample, mutateOfficialSample, verifyOfficialVec1Native } from "../official-scenario";
 import { MODEL_ASSET_FILES } from "../../src/runtime-assets/model-contract";
 
 /**
@@ -170,6 +170,9 @@ if (isMainThread) {
     const db1 = new sqlite3Online.oo1.DB({ filename: dbPath, vfs: "node-file", flags: "c" });
     await populateOfficialSample(db1);
 
+    // vec1 native verification
+    const vec1Verification = verifyOfficialVec1Native(db1);
+
     // Rollback verification
     db1.exec("BEGIN TRANSACTION; INSERT INTO docs(id, title, body) VALUES(999, 'temp', 'temp'); ROLLBACK;");
     const rollbackVerified = db1.selectValue("SELECT count(*) FROM docs WHERE id = 999") === 0;
@@ -209,6 +212,7 @@ if (isMainThread) {
         remainingRows,
         quickCheck,
         rollbackVerified,
+        vec1Verification,
         initialResults,
         reopenedResults
       }

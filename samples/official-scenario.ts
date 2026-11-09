@@ -74,6 +74,102 @@ export interface ScenarioDatabase {
    * @returns プリペアドステートメントオブジェクト。
    */
   prepare(sql: string): ScenarioStatement;
+  /**
+   * 処理名: 単一値取得
+   * 処理概要: クエリを実行し先頭行の第1カラムの値を返す。
+   * 実装理由: カウントや設定値を簡潔に取得するため。
+   * @param sql - 実行するSQL文。
+   * @param bind - バインド値。
+   * @returns 取得したスカラー値。
+   */
+  selectValue?(sql: string, bind?: unknown[]): unknown;
+}
+
+/**
+ * 処理名: vec1ネイティブ検証結果
+ * 処理概要: SQLiteエンジン内部におけるvec1モジュールの実在・スキーマ・実行計画の検証結果を保持する。
+ * 実装理由: TSによるSQL置換・エミュレーションを排他しネイティブvec1実行を判定するため。
+ */
+export interface Vec1NativeVerification {
+  /** 処理名: モジュール登録検証。処理概要: pragma_module_listにvec1が存在するかを保持する。実装理由: Cレベル登録を判定するため。 */
+  moduleRegistered: boolean;
+  /** 処理名: スキーマ保持検証。処理概要: sqlite_schemaのsqlがUSING vec1を保持するかを判定する。実装理由: テーブルすり替えを検出するため。 */
+  schemaUsingVec1: boolean;
+  /** 処理名: 実行計画検証。処理概要: EXPLAIN QUERY PLANにVIRTUAL TABLEが含まれるかを判定する。実装理由: 仮想テーブル走査を検証するため。 */
+  queryPlanVirtualTable: boolean;
+  /** 処理名: ネイティブ判定。処理概要: 全検証軸を満たしているかを保持する。実装理由: 総合的な真偽判定を行うため。 */
+  isNative: boolean;
+}
+
+/**
+ * 処理名: vec1ネイティブ動作検証
+ * 処理概要: pragma_module_list、sqlite_schema、EXPLAIN QUERY PLANからネイティブvec1実行を検証する。
+ * 実装理由: 疑似実装やSQLインターセプトによる見かけ上の動作を検出するため。
+ * @param database - SQLiteデータベース接続インスタンス。
+ * @returns 検証結果オブジェクト。
+ */
+export function verifyOfficialVec1Native(database: ScenarioDatabase): Vec1NativeVerification {
+  let moduleRegistered = false;
+  /**
+   * 処理名: モジュール存在記録
+   * 処理概要: 行が存在した際にモジュール登録フラグを真に設定する。
+   * 実装理由: pragma_module_listでの検索結果を反映するため。
+   */
+  const onModuleRow = (): void => {
+    moduleRegistered = true;
+  };
+  database.exec({
+    sql: "SELECT 1 FROM pragma_module_list WHERE name = 'vec1';",
+    rowMode: "array",
+    callback: onModuleRow
+  });
+
+  let schemaUsingVec1 = false;
+  /**
+   * 処理名: スキーマSQL検証
+   * 処理概要: 取得したSQL定義文字列にUSING vec1が含まれるかを照合する。
+   * 実装理由: 仮想テーブル定義の改変を検出するため。
+   * @param row - 取得行データ。
+   */
+  const onSchemaRow = (row: unknown[]): void => {
+    schemaUsingVec1 = /USING\s+vec1/i.test(String(row[0] ?? ""));
+  };
+  database.exec({
+    sql: "SELECT sql FROM sqlite_schema WHERE name = 'docs_vec';",
+    rowMode: "array",
+    callback: onSchemaRow
+  });
+
+  let queryPlanVirtualTable = false;
+  /**
+   * 処理名: 実行計画詳細検証
+   * 処理概要: クエリプラン詳細に仮想テーブル走査の文言が含まれるかを照合する。
+   * 実装理由: 仮想テーブルインデックスの適用を検出するため。
+   * @param row - 取得行データ。
+   */
+  const onPlanRow = (row: unknown[]): void => {
+    const detail = String(row[3] ?? row[row.length - 1] ?? "");
+    if (/VIRTUAL\s+TABLE/i.test(detail) || /USING\s+vec1/i.test(detail)) {
+      queryPlanVirtualTable = true;
+    }
+  };
+  database.exec({
+    sql: `
+      EXPLAIN QUERY PLAN
+      WITH q(vector) AS MATERIALIZED(SELECT embedding_query('猫'))
+      SELECT c.rowid, c.distance FROM q
+      CROSS JOIN docs_vec(q.vector, '{"k":4}') AS c;
+    `,
+    rowMode: "array",
+    callback: onPlanRow
+  });
+
+  return {
+    moduleRegistered,
+    schemaUsingVec1,
+    queryPlanVirtualTable,
+    isNative: moduleRegistered && schemaUsingVec1 && queryPlanVirtualTable
+  };
 }
 
 /**

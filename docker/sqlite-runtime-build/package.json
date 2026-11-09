@@ -1,0 +1,9 @@
+{
+  "name": "sqlite-runtime-build",
+  "version": "0.0.3",
+  "private": true,
+  "description": "Docker-based builder for SQLite 3.54.1 WASM with vec1 and custom patches",
+  "scripts": {
+    "build": "./build.sh"
+  }
+}

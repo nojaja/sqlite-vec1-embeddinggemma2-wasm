@@ -78,8 +78,34 @@ export function parseVectorColumnDefinitions(
 }
 
 /**
+ * 処理名: カラム名エイリアス解決
+ * 処理概要: テーブル定義とSQL文中のカラム名（embeddingとvector_data）の相互参照を解決する。
+ * 実装理由: DDL定義とクエリ間のカラム名不一致を吸収するため。
+ * @param sql 入力SQL文字列。
+ * @param tableMetadata テーブルごとのメタデータ辞書。
+ * @returns 解決後のSQL文字列。
+ */
+function resolveColumnAliases(
+  sql: string,
+  tableMetadata: Record<string, Record<string, VectorColumnMetadata>>
+): string {
+  let result = sql;
+  for (const tableName in tableMetadata) {
+    const cols = tableMetadata[tableName]!;
+    const hasEmbedding = "embedding" in cols;
+    const hasVectorData = "vector_data" in cols;
+    if (hasEmbedding && !hasVectorData && /\bvector_data\b/i.test(result)) {
+      result = result.replace(/\bvector_data\b/gi, "embedding");
+    } else if (hasVectorData && !hasEmbedding && /\bembedding\b/i.test(result)) {
+      result = result.replace(/\bembedding\b/gi, "vector_data");
+    }
+  }
+  return result;
+}
+
+/**
  * 処理名: VECTOR DDL SQL 変換
- * 処理概要: CREATE TABLE 内の VECTOR(dim, 'model') 構文を検出し、メタデータを保持した上で SQLite が解釈可能な BLOB 型に透過置換する。
+ * 処理概要: CREATE TABLE 内の VECTOR(dim, 'model') 構文を検出し、SQLite が解釈可能な BLOB に置換してメタデータを記録する。
  * 実装理由: SQLite ネイティブ構文との互換性を保ちつつベクトル定義を有効化するため。
  * @param sql 実行対象のSQL文字列。
  * @param tableMetadata テーブルごとのメタデータ辞書。
@@ -91,33 +117,21 @@ export function interceptAndTransformSql(
 ): string {
   if (typeof sql !== "string") return sql;
 
-  const createTableMatch = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_]+)/i.exec(sql);
+  let result = sql;
+  const createTableMatch = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_]+)/i.exec(result);
   if (createTableMatch) {
     const tableName = createTableMatch[1]!;
-    const columnMeta = parseVectorColumnDefinitions(tableName, sql);
+    const columnMeta = parseVectorColumnDefinitions(tableName, result);
     if (Object.keys(columnMeta).length > 0) {
       tableMetadata[tableName] = {
         ...(tableMetadata[tableName] || {}),
         ...columnMeta
       };
-      return sql.replace(/VECTOR\s*\(\s*\d+\s*(?:\s*,\s*['"]?[a-zA-Z0-9_\-\.]+['"]?)?\s*\)/gi, "BLOB");
+      result = result.replace(/VECTOR\s*\(\s*\d+\s*(?:\s*,\s*['"]?[a-zA-Z0-9_\-\.]+['"]?)?\s*\)/gi, "BLOB");
     }
   }
 
-  // カラム名エイリアス透過解決:
-  // テーブルに定義されている VECTOR カラム名と、SQL文中で参照されているカラム名 (embedding <-> vector_data) の相互互換
-  for (const tableName in tableMetadata) {
-    const cols = tableMetadata[tableName]!;
-    const hasEmbedding = "embedding" in cols;
-    const hasVectorData = "vector_data" in cols;
-    if (hasEmbedding && !hasVectorData && /\bvector_data\b/i.test(sql)) {
-      sql = sql.replace(/\bvector_data\b/gi, "embedding");
-    } else if (hasVectorData && !hasEmbedding && /\bembedding\b/i.test(sql)) {
-      sql = sql.replace(/\bembedding\b/gi, "vector_data");
-    }
-  }
-
-  return sql;
+  return resolveColumnAliases(result, tableMetadata);
 }
 
 /**

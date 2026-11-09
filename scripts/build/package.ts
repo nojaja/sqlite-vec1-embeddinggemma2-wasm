@@ -73,15 +73,19 @@ async function main(): Promise<void> {
     );
   }
 
-  // 公式資材に上流バグ修正パッチを適用
-  childProcess.execFileSync("git", [
-    "apply",
-    "--unidiff-zero",
-    "--ignore-space-change",
-    "--ignore-whitespace",
-    "--directory=dist",
-    "patches/sqlite-official.patch"
-  ], { stdio: "inherit" });
+  // 公式資材に上流バグ修正パッチを適用（未適用時のみ）
+  const nodeMjsPath = path.resolve(distDir, "sqlite3-node.mjs");
+  const nodeMjsContent = fs.readFileSync(nodeMjsPath, "utf8");
+  if (!nodeMjsContent.includes("Array.isArray(text)")) {
+    childProcess.execFileSync("git", [
+      "apply",
+      "--unidiff-zero",
+      "--ignore-space-change",
+      "--ignore-whitespace",
+      "--directory=dist",
+      "patches/sqlite-official.patch"
+    ], { stdio: "inherit" });
+  }
 
   // 3. 各エントリーポイントのバンドル
   console.log("[3/5] Bundling product entry points and samples...");
