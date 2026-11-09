@@ -164,7 +164,7 @@ describe("Distribution and Drop-in Compatibility Contracts", () => {
 
   describe("5. Browser inference engine connection contract", () => {
     test("browser inference session must connect to real inference pipeline rather than dummy stub", () => {
-      const entryUrl = "https://example.test/package/dist/browser/index.mjs";
+      const entryUrl = "https://example.test/package/dist/index-browser.mjs";
       const assets = resolveOfficialBrowserAssets(entryUrl);
 
       expect(assets.worker).toBe("https://example.test/package/dist/workers/inference-browser.mjs");

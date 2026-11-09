@@ -60,7 +60,7 @@ async function testOfficialBrowser(): Promise<void> {
     const page = await context.newPage();
     await page.goto(origin);
     await page.evaluate(async () => {
-      const module = await import(location.origin + "/dist/browser/index.mjs") as { sqlite3Worker1Promiser: () => Promise<(kind: string, arguments_: Record<string, unknown>) => Promise<{ result: { resultRows?: unknown[] } }>> };
+      const module = await import(location.origin + "/dist/index-browser.mjs") as { sqlite3Worker1Promiser: () => Promise<(kind: string, arguments_: Record<string, unknown>) => Promise<{ result: { resultRows?: unknown[] } }>> };
       const OriginalWorker = Worker;
       let owner: Worker | undefined;
       globalThis.Worker = class extends OriginalWorker {

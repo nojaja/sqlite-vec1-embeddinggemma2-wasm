@@ -106,7 +106,7 @@ async function verifyWebpackDemo(browser: Browser, root: string, name: string, e
  * @returns 今回gateの完了。
  */
 async function testSqliteWasmCompatibility(): Promise<void> {
-  const loader = resolve("dist/browser/index.mjs");
+  const loader = resolve("dist/index-browser.mjs");
   await access(loader);
   const selected = sqliteWasmDemoCases.filter((candidate) => process.argv[2] === undefined || candidate.name === process.argv[2]);
   if (selected.length === 0) throw new Error("SQLITE_WASM_DEMO_UNKNOWN");
