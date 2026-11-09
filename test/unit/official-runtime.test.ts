@@ -13,7 +13,10 @@ function prepareOfficialRuntime(): void {
   mkdirSync(".build", { recursive: true });
   copyFileSync("downloads/sqlite-official/sqlite3.wasm", ".build/sqlite3.wasm");
   copyFileSync("downloads/sqlite-official/sqlite3-node.mjs", ".build/sqlite3-node.mjs");
-  execFileSync("git", ["apply", "--unidiff-zero", "--ignore-space-change", "--ignore-whitespace", "--directory=.build", "patches/sqlite-official.patch"], { stdio: "inherit" });
+  const buildNodeMjs = readFileSync(".build/sqlite3-node.mjs", "utf8");
+  if (!buildNodeMjs.includes("Array.isArray(text)")) {
+    execFileSync("git", ["apply", "--unidiff-zero", "--ignore-space-change", "--ignore-whitespace", "--directory=.build", "patches/sqlite-official.patch"], { stdio: "inherit" });
+  }
   const filename = resolve(".build/official-jest-runtime.js");
   buildSync({ entryPoints: [".build/sqlite3-node.mjs"], outfile: filename, bundle: true, platform: "node", format: "cjs", supported: { "dynamic-import": false }, define: { "import.meta.url": "__sqliteModuleUrl" }, banner: { js: "const __sqliteModuleUrl=require('node:url').pathToFileURL(__filename).href;" } });
   const initialize = (require(filename) as { default: OfficialFactory }).default;
