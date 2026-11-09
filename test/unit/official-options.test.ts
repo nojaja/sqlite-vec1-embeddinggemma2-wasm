@@ -7,8 +7,8 @@ test("official initializer: omitted embedding remains model-free", () => {
   expect(validateEmbeddingOptions(undefined, { ...worker, worker: false })).toBeUndefined();
 });
 
-test("official initializer: rejects embedding on main thread before preparation", () => {
-  expect(() => validateEmbeddingOptions({ model }, { ...worker, worker: false })).toThrow("E_ENVIRONMENT");
+test("official initializer: allows embedding on main thread without E_ENVIRONMENT", () => {
+  expect(validateEmbeddingOptions({ model }, { ...worker, worker: false })?.backend).toBe("wasm");
 });
 
 test("official initializer: preserves explicit backends without fallback", () => {

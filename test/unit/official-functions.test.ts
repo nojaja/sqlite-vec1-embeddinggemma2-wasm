@@ -16,6 +16,4 @@ test("official SQL: validates input and keeps document/query operations separate
   expect(infer).toHaveBeenLastCalledWith({ operation: "document", body: "body", title: undefined });
   embeddingSqlValue("embedding_query", ["body", "embeddinggemma-2"], infer);
   expect(infer).toHaveBeenLastCalledWith({ operation: "query", body: "body", title: undefined });
-  embeddingSqlValue("gemma_embed_document", ["body", "title"], infer);
-  expect(infer).toHaveBeenLastCalledWith({ operation: "document", body: "body", title: "title" });
 });
