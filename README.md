@@ -31,7 +31,6 @@ npm install --ignore-scripts --progress=false --loglevel=info
 | 保存先 | 内容・入手先 |
 | --- | --- |
 | `downloads/sqlite-official/` | 公式配布物より配置（`sqlite3.wasm`, `sqlite3-node.mjs`, `sqlite3-bundler-friendly.mjs` 等） |
-| `downloads/sqlite-wasm-3.54.1-build1.tgz` | `https://registry.npmjs.org/@sqlite.org/sqlite-wasm/-/sqlite-wasm-3.54.1-build1.tgz` |
 | `downloads/sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz` | `https://codeload.github.com/sqlite/sqlite-wasm/tar.gz/ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a` |
 | `model/embeddinggemma-2-ONNX/daa72c51243991dfcaf9f9137d2c573d8f7790c0/` | HuggingFace `onnx-community/embeddinggemma-2-ONNX` より 11 資材（`model_q4.onnx`, `config.json` 等） |
 
@@ -89,7 +88,7 @@ INSERT INTO documents(id, text_data, embedding)
 VALUES(1, :text, embedding(:text));
 
 -- 3. embedding_query と DISTANCE による類似度順検索
-SELECT id, text_data
+SELECT id, text_data, DISTANCE(embedding, embedding_query(:query)) AS distance
 FROM documents
 ORDER BY DISTANCE(embedding, embedding_query(:query)), id
 LIMIT 3;

@@ -3,7 +3,19 @@ const jsdoc = require("eslint-plugin-jsdoc");
 const sonarjs = require("eslint-plugin-sonarjs");
 
 module.exports = [
-  { ignores: ["node_modules/**", "dist/**", "vendor/**", "coverage/**", ".build/**", "artifacts/**", "docs/typedoc-md/**", "PoT/**", "downloads/sandbox-build/tty/**", "downloads/g03-reference-generation/**"] },
+  {
+    ignores: [
+      "node_modules/**",
+      "dist/**",
+      "vendor/**",
+      "coverage/**",
+      ".build/**",
+      "artifacts/**",
+      "docs/typedoc-md/**",
+      "PoT/**",
+      "downloads/**"
+    ]
+  },
   {
     files: ["**/*.ts"],
     languageOptions: {

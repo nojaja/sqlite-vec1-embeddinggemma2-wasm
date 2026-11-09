@@ -1,11 +1,19 @@
 {
-  "name": "sqlite-vec1-embeddinggemma2-wasm",
+  "name": "@nojaja/sqlite-vec1-embeddinggemma2-wasm",
   "version": "0.0.1",
   "description": "SQLite official vec1 and EmbeddingGemma 2 with WebAssembly runtimes",
-  "private": true,
+  "keywords": ["sqlite", "sqlite-wasm", "vector-search", "embeddings", "typescript"],
+  "private": false,
   "type": "commonjs",
   "main": "./dist/index.bundle.js",
   "types": "./dist/index.d.ts",
+  "publishConfig": { "access": "public" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nojaja/sqlite-vec1-embeddinggemma2-wasm.git"
+  },
+  "bugs": { "url": "https://github.com/nojaja/sqlite-vec1-embeddinggemma2-wasm/issues" },
+  "homepage": "https://github.com/nojaja/sqlite-vec1-embeddinggemma2-wasm#readme",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -23,7 +31,7 @@
     "./package.json": "./package.json"
   },
   "engines": { "node": ">=24 <25" },
-  "files": ["dist", "manifests", "licenses", "THIRD_PARTY_NOTICES.md", "README.md", "samples", "vendor/sqlite-wasm/index.d.mts"],
+  "files": ["dist", "manifests", "README.md", "LICENSE", "samples"],
   "allowScripts": {
     "@parcel/watcher@2.6.0": false,
     "@swc/core@1.16.21": false,
@@ -46,7 +54,6 @@
     "lint": "eslint . --max-warnings 0",
     "depcruise": "depcruise src tooling scripts --config .dependency-cruiser.js",
     "typedoc": "node node_modules/typedoc/bin/typedoc --options typedoc.js",
-    "check:format": "node scripts/quality/check-format.ts",
     "test:sqlite": "node scripts/run.ts test-official-sqlite",
     "test:storage": "node scripts/run.ts test-storage",
     "test:search": "node scripts/run.ts test-official-model",

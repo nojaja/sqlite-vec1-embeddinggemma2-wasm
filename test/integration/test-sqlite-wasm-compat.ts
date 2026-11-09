@@ -95,7 +95,7 @@ async function verifyWebpackDemo(browser: Browser, root: string, name: string, e
     return { name, status: "passed", externalRequests };
   } finally {
     await context.close();
-    await new Promise<void>((complete, reject) => server.close((failure) => failure ? reject(failure) : complete()));
+    await new Promise<void>((complete, reject) => server.close((failure?: Error | null) => failure ? reject(failure) : complete()));
   }
 }
 

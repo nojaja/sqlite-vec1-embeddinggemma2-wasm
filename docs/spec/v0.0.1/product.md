@@ -80,7 +80,7 @@ Nodeの他OS・architecture・major版は `E_ENVIRONMENT`。未知backend、`aut
 
 ### 3.4 接続と終了
 
-vec1は公式SQLite Wasm組み込みの仮想テーブル拡張、embedding系は公式CAPI/oo1拡張で全接続へ登録する。oo1 constructorおよびCAPI step/reset/finalizeを包括して直接CAPI呼出しを取りこぼさない。callbackとfunction pointerはmodule寿命まで保持する。
+vec1 は C の static auto-extension（`sqlite3_wasm_extra_init.c` による `sqlite3_auto_extension(sqlite3_extension_init)` 登録）として SQLite Wasm バイナリ内部に組み込まれ、全接続へネイティブに自動登録される。embedding 系は公式 CAPI/oo1 拡張で全接続へ登録する。oo1 constructor および CAPI step/reset/finalize を包括して直接 CAPI 呼出しを取りこぼさない。callback と function pointer は module 寿命まで保持する。
 
 通常 `db.close()` は同期。全接続をcloseしてから `await sqlite3.embedding.close()` を呼ぶ。生存接続があれば `E_DB_IN_USE` で拒否し、callbackやsessionを先に破棄しない。成功したmodule closeは再呼出し可能。内部登録解除、元capi復元、session/model/port/Worker終了を行う。取得したSAH poolにはDB/session終了後 `pauseVfs()` を呼び、保存データを消さない。Nodeは最後に所有VFSを解除する。
 

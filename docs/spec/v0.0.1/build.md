@@ -2,15 +2,52 @@
 
 ## 1. ビルド概要
 
-本プロジェクトのビルドは、公式ビルド済み完成資材（SQLite 3.54.1 + vec1 0.7 組み込み Wasm/ローダー、および ONNX Runtime）を入力とし、TypeScript/esbuild を用いて高信頼な Node.js / ブラウザ向け配布パッケージを決定論的に生成する。
-
-検証済みの完成バイナリおよび JavaScript/TypeScript コードのバンドル・型定義生成に特化することで、クロスプラットフォーム（Windows / Linux / ブラウザ）で高速かつ安定したビルドを実現する。
+本プロジェクトのビルドは、以下の 2 段階で構成される：
+1. **上流資材再生成**: SQLite 3.54.1 フルソース（`sqlite-src-3540100.zip`）および `vec1.c`（version 0.7）を入力とし、Emscripten SDK（`emscripten/emsdk:6.0.8`）環境を用いて C 言語レベルで静的組み込み（static auto-extension）した公式互換 Wasm モジュール群（8 ファイル）を生成する。
+2. **製品パッケージビルド**: 生成された SQLite 資材、ONNX Runtime、および Transformers.js を入力とし、TypeScript/esbuild を用いて高信頼な Node.js / ブラウザ向け配布パッケージを決定論的に生成する。
 
 ---
 
-## 2. ビルド工程
+## 2. SQLite 再生成仕様 (`docker/sqlite-runtime-build`)
 
-ビルドは `npm run build`（`node scripts/build/package.ts`）により、以下の 5 段階で自動実行される。
+公式配布のデモアーカイブ単体の Wasm には vec1 拡張が含まれていないため、隔離 Linux x64 コンテナ環境において以下の手順で SQLite 3.54.1 + vec1 0.7 組み込み Wasm を生成する。ビルドコンテナおよびホスト deb 依存関係の詳細要件は [linux-toolchain.md](linux-toolchain.md) を参照すること。
+
+### 2.1 入力資材と環境
+- **ビルドコンテナ環境**: `emscripten/emsdk:6.0.8`（Linux x64、詳細は [linux-toolchain.md](linux-toolchain.md)）
+- **SQLite フルソース**: `downloads/sqlite-src-3540100.zip`（VERSION=3.54.1、configure、ext/wasm/GNUmakefile を含む）
+- **vec1 C ソース**: `downloads/vec1.c`（またはソース同梱 `ext/vec1/vec1.c`。version 0.7 Scalar single-threaded）
+
+### 2.2 ソース構成およびフック
+- `ext/wasm/vec1.c` としてソースを配置し、マクロ `#define VEC1_VERSION "0.7"`, `#define VEC1_STATIC 1`, `#define VEC1_THREADS 0` を設定。
+- `ext/wasm/sqlite3_wasm_extra_init.c` を作成し、`sqlite3_auto_extension((void(*)(void))sqlite3_extension_init)` により公式 vec1 の初期化関数を全 DB 接続へ自動登録。
+
+### 2.3 C レベル限定互換変更
+1. **vec1 savepoint 再入保護**: `Vec1Writer *pWriter = pTab->pWriter` を退避し、NULL なら `SQLITE_OK`、`pTab->pWriter = 0` を `vec1WriterFinish(pWriter, ...)` より先に行う。
+2. **C 言語版 DISTANCE 関数**: 2つの 3072 バイト Float32 BLOB を受け取り、倍精度 L2 ノルム正規化を行った上で `vec1CosDist` へ委譲するスカラー関数 `DISTANCE(left, right)` を静的登録。
+3. **JS capi sqlite3_bind_text**: Array 判定・連結の誤変数 `pMem` を `text` へ訂正し、文字列 allocation は `allocCString(text, true)` でポインタと長さを取得。
+4. **oo1 built-in trace / step 警告**: 固定 `SQLITE_TRACE_EVENT` とカウンタ、ステップ失敗警告は `SQLITE_STEP_FAILED` とエラーコードのみをログ出力。
+5. **OPFS void 参照**: 上流の未使用 local/catch/flags/lock を void 参照で安全に処理。
+
+### 2.4 ビルドコマンドと生成成果物
+- `./configure --disable-readline --disable-tcl`
+- `make sqlite3.c` により amalgamation を生成
+- `cd ext/wasm && make -j2 npm bin.wasm-opt=`（Emscripten 最適化を維持しつつ追加 wasm-opt を無効化）
+- 生成された `npm-bundle.zip` より以下の 8 ファイルを `downloads/sqlite-official/` へ配置：
+  - `sqlite3.wasm` (SQLite 3.54.1 + vec1 0.7 組み込み)
+  - `sqlite3-node.mjs`
+  - `sqlite3-bundler-friendly.mjs`
+  - `sqlite3.mjs`
+  - `sqlite3-opfs-async-proxy.js`
+  - `sqlite3-worker1.mjs`
+  - `sqlite3-worker1-bundler-friendly.mjs`
+  - `sqlite3-worker1-promiser.mjs`
+- **完了検証**: 同梱 Node.js により `vec1_info()` が `"version 0.7 (Scalar, single-threaded)"` を返し、`DISTANCE`、768 次元 flat/CRUD、`quick_check` が PASS することを確認して完了とする。
+
+---
+
+## 3. 製品パッケージビルド工程
+
+製品ビルドは `npm run build`（`node scripts/build/package.ts`）により、以下の 5 段階で自動実行される。
 
 ```
 [1/5] 推論ビルド (scripts/build/inference.ts)
@@ -33,7 +70,7 @@
 
 ---
 
-## 3. 推論ビルド仕様 (`scripts/build/inference.ts`)
+## 4. 推論ビルド仕様 (`scripts/build/inference.ts`)
 
 推論ビルドは、推論 Worker が利用するバイナリおよびライブラリを `dist/` 配下に構成する。
 
@@ -65,7 +102,7 @@
 
 ---
 
-## 4. 製品パッケージバンドル仕様 (`scripts/build/package.ts`)
+## 5. 製品パッケージバンドル仕様 (`scripts/build/package.ts`)
 
 ### 4.1 エントリポイント構成
 
@@ -91,7 +128,7 @@ esbuild で CJS 形式でバンドルする際、以下の設定を施す：
 
 ---
 
-## 5. 型定義ファイルの生成
+## 6. 型定義ファイルの生成
 
 公式 `@sqlite.org/sqlite-wasm@3.54.1-build1` の型定義（`index.d.mts`）を基盤とし、TypeScript コンパイラおよび型合成スクリプトを用いて型宣言ファイルを生成する。
 - 必須型エクスポート: 公式の `Sqlite3Static`, `Database`, `PreparedStatement`, `CAPI`, `SqlValue`, `BindingSpec`, `sqlite3Worker1Promiser` および製品固有の `ProductSqlite3`, `ProductInitOptions`, `EmbeddingOptions`, `EmbeddingControl`
@@ -102,14 +139,14 @@ esbuild で CJS 形式でバンドルする際、以下の設定を施す：
 
 ---
 
-## 6. 配布成果物構成および npm 設定
+## 7. 配布成果物構成および npm 設定
 
 最終配布パッケージ（npm tarball）に含まれるファイル構成および npm 設定：
 - パッケージ名: `@nojaja/sqlite-vec1-embeddinggemma2-wasm`
 - 公開設定: `"private": false`、`"publishConfig": { "access": "public" }`
 - 同梱ファイル (`files`):
   - `dist/`: バンドル済み JavaScript、Wasm バイナリ、型定義 (`index.d.ts`, `index.d.mts` 等)
-  - `manifests/`: `embeddinggemma2-q4.json`
-  - `README.md`: 利用ドキュメント
+- `manifests/`: `embeddinggemma2-q4.json`
+- `README.md`: 利用ドキュメント
   - `LICENSE`: ライセンス表示
   - `package.json`: 公式互換エクスポート定義およびメタデータ

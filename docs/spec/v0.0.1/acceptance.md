@@ -1,4 +1,4 @@
-# v0.0.3 受入条件
+# v0.0.1 受入条件
 
 ## 1. 受入方針と検証順序
 
@@ -111,3 +111,9 @@ unit は 35 ファイル、E2E は 4 ファイル、統合テストを含め `te
    - `VECTOR(768 , 'embeddinggemma-2') STRICT` テーブル定義が透過的に作成されること。
    - `INSERT INTO documents(id,text_data,embedding) VALUES(1,:text,embedding(:text));` によるベクトル埋め込みの生成と保存。
    - `SELECT id,text_data FROM documents ORDER BY DISTANCE(embedding,embedding_query(:query)),id LIMIT 3;` によるコサイン距離順セマンティック検索で期待される文書が最上位に抽出されること。
+5. **vec1 ネイティブ仮想テーブル動作の厳格検証要件**:
+   E2E および統合テストにおいて、TS/JS 側のエミュレーション・擬似実装（SQL 置換や JS UDF 全探索）を排他し、Wasm 内の C 言語ネイティブ vec1 仮想テーブルモジュールが真に動作していることを以下の 4 重検証により判定・受入する：
+   - **モジュール登録検証**: `SELECT count(*) FROM pragma_module_list WHERE name = 'vec1'` が `1` であること（C API `sqlite3_create_module` による登録の証明）。
+   - **スキーマ保持検証**: `SELECT sql FROM sqlite_schema WHERE name = 'docs_vec'` が `CREATE VIRTUAL TABLE docs_vec USING vec1(...)` を保持していること（通常テーブルへのすり替えがない証明）。
+   - **実行計画（プラン）検証**: ベクトル検索クエリ（`CROSS JOIN docs_vec(q.vector, ...)`）に対して `EXPLAIN QUERY PLAN` を実行し、`detail` に `VIRTUAL TABLE INDEX` または `USING vec1` が含まれること（仮想テーブルインデックス走査の証明）。
+   - **CAPI 直接実行検証**: TS の SQL 前処理ラッパーを介さず、低レベル CAPI（`sqlite3.capi.sqlite3_exec`）で直接 `CREATE VIRTUAL TABLE ... USING vec1` を実行し、`SQLITE_OK` で完了すること（Wasm バイナリ単体での vec1 静的組み込みの証明）。
