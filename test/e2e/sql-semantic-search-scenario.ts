@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { MODEL_REVISION } from "../../src/runtime-assets/model-contract";
+import type { Vec1NativeVerification } from "../../samples/official-scenario";
 import { E2eTimingRecorder } from "./e2e-timing";
 
 /** 処理名: 公式sample E2E report。処理概要: model入力を含まない検索・保存結果を表す。実装理由: 本配布の所有Worker経路を受入判定するため。 */
@@ -17,6 +18,7 @@ interface OfficialSampleReport {
   remainingRows: string;
   quickCheck: string;
   rollbackVerified: boolean;
+  vec1Verification: Vec1NativeVerification;
 }
 
 /**
@@ -54,6 +56,8 @@ export async function runBackendScenario(backend: "wasm" | "directml"): Promise<
     const report = JSON.parse(await readFile(filename, "utf8")) as OfficialSampleReport;
     expect(report).toMatchObject({ status: "passed", backend, database: "node-file", inserted: 4, offlineRequests: 0, remainingRows: "3", quickCheck: "ok", rollbackVerified: true });
     expect(report.onlineRequests).toBe(11);
+    expect(report.vec1Verification).toBeDefined();
+    expect(report.vec1Verification.isNative).toBe(true);
     verifySampleRanking(report.initialResults, 4);
     verifySampleRanking(report.reopenedResults, 3);
     expect(report.initialResults[0]?.rowid).toBe("1");
