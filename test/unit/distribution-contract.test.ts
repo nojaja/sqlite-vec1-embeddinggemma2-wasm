@@ -65,6 +65,13 @@ describe("Distribution and Drop-in Compatibility Contracts", () => {
       const originalCwd = process.cwd();
       const foreignDir = tmpdir();
 
+      /**
+       * 処理名: パッケージ資材解決
+       * 処理概要: 相対パスからルート基準の絶対パスを解決する。
+       * 実装理由: process.cwdに依存しないパス解決を検証するため。
+       * @param relativePath - パッケージ内相対パス。
+       * @returns 絶対パス。
+       */
       function resolvePackageAsset(relativePath: string): string {
         return resolve(rootDir, relativePath);
       }
@@ -87,6 +94,14 @@ describe("Distribution and Drop-in Compatibility Contracts", () => {
     });
 
     test("sqlite3.wasm locateFile contract must resolve module-relative path", () => {
+      /**
+       * 処理名: SQLite WASM配置解決
+       * 処理概要: パッケージディレクトリ内のsqlite3.wasmの存在を確認してパスを返す。
+       * 実装理由: locateFile契約の動作を検証するため。
+       * @param packageDistDir - 配布ディレクトリパス。
+       * @param file - ファイル名。
+       * @returns 解決されたファイルパス。
+       */
       function locateSqliteWasm(packageDistDir: string, file: string): string {
         if (file === "sqlite3.wasm") {
           const direct = resolve(packageDistDir, "sqlite3.wasm");
@@ -105,6 +120,11 @@ describe("Distribution and Drop-in Compatibility Contracts", () => {
   describe("3. Thread constraint relaxation contract", () => {
     test("specification contract allows embedding initialization when environment.worker is false", () => {
       // 新仕様: メインスレッドであってもバックグラウンド Worker を利用した推論が許可される契約
+      /**
+       * 処理名: 緩和環境定義インターフェース
+       * 処理概要: メインスレッド推論を許容する環境設定を表現する。
+       * 実装理由: スレッド制約緩和コントラクトを検証するため。
+       */
       interface RelaxedEnvironment {
         worker: boolean;
         runtime: "node" | "browser";
@@ -112,7 +132,14 @@ describe("Distribution and Drop-in Compatibility Contracts", () => {
         architecture: string;
       }
 
-      function validateRelaxedThreadPolicy(env: RelaxedEnvironment): boolean {
+      /**
+       * 処理名: スレッドポリシー検証
+       * 処理概要: 緩和された環境設定で推論実行が可能かを判定する。
+       * 実装理由: メインスレッドでの実行許可コントラクトを検証するため。
+       * @param _env - 検証対象の環境設定。
+       * @returns 実行可能であるかどうかの真偽値。
+       */
+      function validateRelaxedThreadPolicy(_env: RelaxedEnvironment): boolean {
         // メインスレッド (worker: false) でも環境エラーで即座に拒否しない
         return true;
       }
@@ -149,6 +176,13 @@ describe("Distribution and Drop-in Compatibility Contracts", () => {
       expect(dummyVector.every((b) => b === 0)).toBe(true);
 
       // 本物の推論セッションは固定ゼロ値ではないこと（コントラクト定義）
+      /**
+       * 処理名: ダミースタブ判定
+       * 処理概要: 推論結果が全ゼロのダミーベクトルであるかを判定する。
+       * 実装理由: 本番推論エンジンが本物の結果を返す契約を検証するため。
+       * @param inferResult - 検証対象のバイト配列。
+       * @returns ダミーであるかどうかの真偽値。
+       */
       const isDummyStub = (inferResult: Uint8Array): boolean => {
         return inferResult.every((b) => b === 0);
       };
