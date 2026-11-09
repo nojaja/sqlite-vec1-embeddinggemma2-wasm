@@ -31,7 +31,7 @@
     "./package.json": "./package.json"
   },
   "engines": { "node": ">=24 <25" },
-  "files": ["dist", "manifests", "licenses", "THIRD_PARTY_NOTICES.md", "README.md", "samples", "vendor/sqlite-wasm/index.d.mts"],
+  "files": ["dist", "manifests", "README.md", "LICENSE", "samples"],
   "allowScripts": {
     "@parcel/watcher@2.6.0": false,
     "@swc/core@1.16.21": false,
