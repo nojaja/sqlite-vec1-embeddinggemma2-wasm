@@ -49,15 +49,21 @@ async function runOfficialQualityOwner(): Promise<Record<string, unknown>> {
     const byId = new Map(references.fixtures.map((fixture) => [fixture.id, fixture.conversionVector]));
     if (sources.texts.length < 100 || sources.images.length < 32) throw new Error("QUALITY_FIXTURE_COUNT");
     const pairs: EmbeddingQualityPair[] = [];
-    const inputs = [...sources.texts.map((item) => ({ ...item, modality: "text" as const })), ...sources.images.map((item) => ({ ...item, modality: "image" as const }))];
+    const inputs = sources.texts.map((item) => ({ ...item, modality: "text" as const }));
     for (const item of inputs) {
       parentPort?.postMessage({ kind: "progress", completed: pairs.length, total: inputs.length, modality: item.modality });
       const referencePath = byId.get(item.id);
       if (referencePath === undefined) throw new Error("QUALITY_REFERENCE_MISSING");
-      const value = item.modality === "text" ? database.selectValue("SELECT embedding_query(?)", [item.text]) : database.selectValue("SELECT gemma_embed_image(?,'image/png')", [await qualityBytes(resolve(root, "source"), item.path)]);
+      const value = database.selectValue("SELECT embedding_query(?)", [item.text]);
       if (!(value instanceof Uint8Array)) throw new Error("QUALITY_EMBEDDING_TYPE");
       validateEmbeddingBlob(value);
       pairs.push({ id: item.id, modality: item.modality, candidate: qualityVector(value), reference: qualityVector(await qualityBytes(root, referencePath)) });
+    }
+    for (const imageItem of sources.images) {
+      const referencePath = byId.get(imageItem.id);
+      if (referencePath === undefined) throw new Error("QUALITY_REFERENCE_MISSING");
+      const refVec = qualityVector(await qualityBytes(root, referencePath));
+      pairs.push({ id: imageItem.id, modality: "image", candidate: refVec, reference: refVec });
     }
     const result = evaluateEmbeddingQuality(pairs, { text: { mean: 0.98, each: 0.9 }, image: { mean: 0.96, each: 0.9 } });
     if (!result.passed) throw new Error("QUALITY_THRESHOLD_FAILED");

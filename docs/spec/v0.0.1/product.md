@@ -86,9 +86,9 @@ vec1 は C の static auto-extension（`sqlite3_wasm_extra_init.c` による `sq
 
 ## 4. SQL関数と型メタデータ連携 (方式A)
 
-### 4.1 SQL関数一覧（特定モデル依存関数の全廃）
+### 4.1 SQL関数一覧
 
-特定モデルに特化した関数（`gemma_embed_*` 群）は完全に廃止・削除され、モデル非依存の汎用関数のみを提供する。
+モデル非依存の汎用関数を提供する。
 
 | 関数 | 登録arity | 用途 |
 | --- | :--- | :--- |
@@ -200,4 +200,3 @@ SQL期限は最初のstepからの単調時計で、ROW読み出し休止時間�
 | `E_DATABASE_LOCKED`, `E_STORAGE` | Node保存所有競合、I/O故障 |
 | `E_OUTCOME_UNKNOWN` | 外側supervisorが未応答ownerを停止 |
 
-公式loaderの警告は `SQLITE_STEP_FAILED` とSQLite code/nameだけ、組込みtraceは `SQLITE_TRACE_EVENT` とcounterだけを出す。SQL全文・DB filename・bind値を上流のconsoleへ漏らさない。
