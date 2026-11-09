@@ -1,6 +1,6 @@
 # SQLite vec1 / EmbeddingGemma 2 Wasm
 
-SQLite 3.54.1、公式 vec1 0.7、および EmbeddingGemma 2 を統合する TypeScript ライブラリです。
+SQLite 3.54.1、公式 vec1 0.8、および EmbeddingGemma 2 を統合する TypeScript ライブラリです。
 公開 package 名は `sqlite-vec1-embeddinggemma2-wasm`、version は `0.0.1` です。
 
 ---
@@ -26,13 +26,7 @@ npm install --ignore-scripts --progress=false --loglevel=info
 
 ## 3. 必要な資材と配置先
 
-本プロジェクトは、公式ビルド済み成果物（公式 SQLite 3.54.1 + vec1 0.7 組み込み Wasm、公式 ONNX Runtime、Transformers.js）を採用しています。C++ コンパイラによる再コンパイルは不要です。
-
-| 保存先 | 内容・入手先 |
-| --- | --- |
-| `downloads/sqlite-official/` | 公式配布物より配置（`sqlite3.wasm`, `sqlite3-node.mjs`, `sqlite3-bundler-friendly.mjs` 等） |
-| `downloads/sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz` | `https://codeload.github.com/sqlite/sqlite-wasm/tar.gz/ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a` |
-| `model/embeddinggemma-2-ONNX/daa72c51243991dfcaf9f9137d2c573d8f7790c0/` | HuggingFace `onnx-community/embeddinggemma-2-ONNX` より 11 資材（`model_q4.onnx`, `config.json` 等） |
+本プロジェクトで必要な資材（公式 SQLite 3.54.1 + vec1 0.8 組み込み Wasm、EmbeddingGemma 2 モデル資材、ビルド・検証用入力アーカイブなど）の一覧、入手先 URL、および保存先ディレクトリの詳細は [`docs/spec/v0.0.1/assets.md`](docs/spec/v0.0.1/assets.md) に集約されています。
 
 資材配置の検証は以下のコマンドで実行できます：
 ```shell

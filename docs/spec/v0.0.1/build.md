@@ -3,22 +3,22 @@
 ## 1. ビルド概要
 
 本プロジェクトのビルドは、以下の 2 段階で構成される：
-1. **上流資材再生成**: SQLite 3.54.1 フルソース（`sqlite-src-3540100.zip`）および `vec1.c`（version 0.7）を入力とし、Emscripten SDK（`emscripten/emsdk:6.0.8`）環境を用いて C 言語レベルで静的組み込み（static auto-extension）した公式互換 Wasm モジュール群（8 ファイル）を生成する。
+1. **上流資材再生成**: SQLite 3.54.1 フルソース（`sqlite-src-3540100.zip`）および `vec1.c`（version 0.8）を入力とし、Emscripten SDK（`emscripten/emsdk:6.0.8`）環境を用いて C 言語レベルで静的組み込み（static auto-extension）した公式互換 Wasm モジュール群（8 ファイル）を生成する。
 2. **製品パッケージビルド**: 生成された SQLite 資材、ONNX Runtime、および Transformers.js を入力とし、TypeScript/esbuild を用いて高信頼な Node.js / ブラウザ向け配布パッケージを決定論的に生成する。
 
 ---
 
 ## 2. SQLite 再生成仕様 (`docker/sqlite-runtime-build`)
 
-公式配布のデモアーカイブ単体の Wasm には vec1 拡張が含まれていないため、隔離 Linux x64 コンテナ環境において以下の手順で SQLite 3.54.1 + vec1 0.7 組み込み Wasm を生成する。ビルドコンテナおよびホスト deb 依存関係の詳細要件は [linux-toolchain.md](linux-toolchain.md) を参照すること。
+公式配布のデモアーカイブ単体の Wasm には vec1 拡張が含まれていないため、隔離 Linux x64 コンテナ環境において以下の手順で SQLite 3.54.1 + vec1 0.8 組み込み Wasm を生成する。ビルドコンテナおよびホスト deb 依存関係の詳細要件は [linux-toolchain.md](linux-toolchain.md) を参照すること。
 
 ### 2.1 入力資材と環境
 - **ビルドコンテナ環境**: `emscripten/emsdk:6.0.8`（Linux x64、詳細は [linux-toolchain.md](linux-toolchain.md)）
 - **SQLite フルソース**: `downloads/sqlite-src-3540100.zip`（VERSION=3.54.1、configure、ext/wasm/GNUmakefile を含む）
-- **vec1 C ソース**: `downloads/vec1.c`（またはソース同梱 `ext/vec1/vec1.c`。version 0.7 Scalar single-threaded）
+- **vec1 C ソース**: `downloads/vec1.c`（またはソース同梱 `ext/vec1/vec1.c`。version 0.8 Scalar single-threaded）
 
 ### 2.2 ソース構成およびフック
-- `ext/wasm/vec1.c` としてソースを配置し、マクロ `#define VEC1_VERSION "0.7"`, `#define VEC1_STATIC 1`, `#define VEC1_THREADS 0` を設定。
+- `ext/wasm/vec1.c` としてソースを配置し、マクロ `#define VEC1_VERSION "0.8"`, `#define VEC1_STATIC 1`, `#define VEC1_THREADS 0` を設定。
 - `ext/wasm/sqlite3_wasm_extra_init.c` を作成し、`sqlite3_auto_extension((void(*)(void))sqlite3_extension_init)` により公式 vec1 の初期化関数を全 DB 接続へ自動登録。
 
 ### 2.3 C レベル限定互換変更
@@ -33,7 +33,7 @@
 - `make sqlite3.c` により amalgamation を生成
 - `cd ext/wasm && make -j2 npm bin.wasm-opt=`（Emscripten 最適化を維持しつつ追加 wasm-opt を無効化）
 - 生成された `npm-bundle.zip` より以下の 8 ファイルを `downloads/sqlite-official/` へ配置：
-  - `sqlite3.wasm` (SQLite 3.54.1 + vec1 0.7 組み込み)
+  - `sqlite3.wasm` (SQLite 3.54.1 + vec1 0.8 組み込み)
   - `sqlite3-node.mjs`
   - `sqlite3-bundler-friendly.mjs`
   - `sqlite3.mjs`
@@ -41,7 +41,7 @@
   - `sqlite3-worker1.mjs`
   - `sqlite3-worker1-bundler-friendly.mjs`
   - `sqlite3-worker1-promiser.mjs`
-- **完了検証**: 同梱 Node.js により `vec1_info()` が `"version 0.7 (Scalar, single-threaded)"` を返し、`DISTANCE`、768 次元 flat/CRUD、`quick_check` が PASS することを確認して完了とする。
+- **完了検証**: 同梱 Node.js により `vec1_info()` が `"version 0.8 (Scalar, single-threaded)"` を返し、`DISTANCE`、768 次元 flat/CRUD、`quick_check` が PASS することを確認して完了とする。
 
 ---
 
@@ -55,11 +55,11 @@
   ├─ 画像コーデック Wasm の dist/image への配置
   └─ Transformers.js パッチ適用およびバンドル (Node / Browser / DirectML)
 [2/5] 公式 SQLite 資材の dist/ へのコピー
-  ├─ sqlite3.wasm (SQLite 3.54.1 + vec1 0.7)
+  ├─ sqlite3.wasm (SQLite 3.54.1 + vec1 0.8)
   └─ 公式ローダー群 (sqlite3-node.mjs, sqlite3-bundler-friendly.mjs 等)
 [3/5] 製品エントリポイントおよびサンプルのバンドル (esbuild)
   ├─ dist/node/index.{js,mjs} (Node エントリ)
-  ├─ dist/browser/index.mjs (ブラウザエントリ)
+  ├─ dist/index-browser.mjs (ブラウザエントリ)
   ├─ dist/workers/inference-node.js (Node 同期ブリッジ Worker)
   └─ dist/workers/inference-browser.mjs (ブラウザ推論 Worker)
 [4/5] TypeScript 型定義ファイルの生成 (tsc --emitDeclarationOnly)
@@ -111,7 +111,7 @@
 | `dist/index.bundle.js` | CJS | 汎用メイン | `import.meta.url` ポリフィル注入 |
 | `dist/node/index.js` | CJS | Node.js (require) | `node-file` VFS 初期化、Worker 接続 |
 | `dist/node/index.mjs` | ESM | Node.js (import) | CJS エントリのラッパー |
-| `dist/browser/index.mjs` | ESM | ブラウザ | 専用 Worker / OPFS SAH Pool 連携 |
+| `dist/index-browser.mjs` | ESM | ブラウザ | 専用 Worker / OPFS SAH Pool 連携 |
 | `dist/workers/inference-node.js` | CJS | Node Worker | Atomics 同期ブリッジおよび推論実行 |
 | `dist/workers/inference-browser.mjs`| ESM | ブラウザ Worker | WebGPU adapter 注入および推論実行 |
 

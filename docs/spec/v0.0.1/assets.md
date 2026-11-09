@@ -1,18 +1,20 @@
 # v0.0.1 資材 URL 一覧
 
-## 1. 保存先
+## 1. 保存先と資材構成方針
 
 外部から調達するアーカイブ、ライブラリ成果物を `downloads/` へ、推論用モデルを `model/` へ保存する。以下のパスはプロジェクトルート基準とする。通常 npm パッケージは `package.json` に固定したバージョンを `npm install` で取得する。
 
+本プロジェクトは、公式ビルド済み成果物（公式 SQLite 3.54.1 + vec1 0.8 組み込み Wasm、公式 ONNX Runtime、Transformers.js）を採用しており、利用環境での C++ コンパイラによる再コンパイルは不要である。
+
 ### 必要入力の範囲
 
-本プロジェクトでは、SQLite 3.54.1 と vec1 0.7 を C 言語レベルで静的組み込み（static auto-extension）した公式互換 Wasm モジュール、および公式 ONNX Runtime / Transformers.js を採用する。
+本プロジェクトでは、SQLite 3.54.1 と vec1 0.8 を C 言語レベルで静的組み込み（static auto-extension）した公式互換 Wasm モジュール、および公式 ONNX Runtime / Transformers.js を採用する。
 
-公式配布の demo アーカイブ（`sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz`）単体の Wasm には vec1 拡張が含まれていないため、`sqlite-src-3540100.zip` および `vec1.c`（version 0.7）から再生成された完成資材 8 ファイルを `downloads/sqlite-official/` 配下に配置して製品ビルドに消費する。
+公式配布の demo アーカイブ（`sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz`）単体の Wasm には vec1 拡張が含まれていないため、`sqlite-src-3540100.zip` および `vec1.c`（version 0.8）から再生成された完成資材 8 ファイルを `downloads/sqlite-official/` 配下に配置して製品ビルドに消費する。
 
 | 種類 | 準備方法・完了条件 |
 | --- | --- |
-| 公式 SQLite + vec1 完成モジュール | `sqlite-src-3540100.zip` および `vec1.c`（version 0.7 Scalar single-threaded）を Emscripten SDK（`emscripten/emsdk:6.0.8`）環境にてビルドし、生成された 8 ファイル（`sqlite3.wasm`, `sqlite3-node.mjs`, `sqlite3-bundler-friendly.mjs` 等）を `downloads/sqlite-official/` 配下へ配置する（Linux 再生成環境およびホスト依存は [linux-toolchain.md](linux-toolchain.md) 参照）。 |
+| 公式 SQLite + vec1 完成モジュール | `sqlite-src-3540100.zip` および `vec1.c`（version 0.8 Scalar single-threaded）を Emscripten SDK（`emscripten/emsdk:6.0.8`）環境にてビルドし、生成された 8 ファイル（`sqlite3.wasm`, `sqlite3-node.mjs`, `sqlite3-bundler-friendly.mjs` 等）を `downloads/sqlite-official/` 配下へ配置する（Linux 再生成環境およびホスト依存は [linux-toolchain.md](linux-toolchain.md) 参照）。 |
 | 互換検証用 archive | 公式 demo リポジトリアーカイブ（`sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz`）を取得し、公式デモとの互換性を検証する。 |
 | manifests/embeddinggemma2-q4.json | モデルの 11 資材の完全性（ファイルサイズおよび SHA-256）を定義し、推論初期化時に検証する。 |
 | 推論モデル (EmbeddingGemma 2) | HuggingFace の固定リビジョンから 11 資材を取得し、`model/embeddinggemma-2-ONNX/daa72c51243991dfcaf9f9137d2c573d8f7790c0/` へ配置する。 |
@@ -23,16 +25,12 @@
 
 以下の資材を `downloads/` 配下に配置する。
 
-| 保存先 | 入手出元・URL | 用途 |
+| 保存先 | 入手出元・URL | 用途・補足 |
 | --- | --- | --- |
 | `downloads/sqlite-official-host/` | Debian 12 (bookworm) official repository | SQLite 再生成コンテナ用 host deb 集合（77 deb、詳細は [linux-toolchain.md](linux-toolchain.md)） |
 | `downloads/sqlite-src-3540100.zip` | `https://sqlite.org/2026/sqlite-src-3540100.zip` | SQLite 3.54.1 フルソース（Wasm 再生成用） |
-| `downloads/vec1.c` | `https://sqlite.org/vec1/raw/vec1.c?ci=version-0.7`（またはソース同梱 `ext/vec1/vec1.c`） | vec1 0.7 C ソース（Scalar, single-threaded） |
-| `downloads/sqlite-official/sqlite3.wasm` | SQLite フルソース + vec1.c より再生成 | SQLite 3.54.1 + vec1 0.7 組み込み WebAssembly バイナリ |
-| `downloads/sqlite-official/sqlite3-node.mjs` | SQLite フルソース + vec1.c より再生成 | Node.js 向け公式ローダー |
-| `downloads/sqlite-official/sqlite3-bundler-friendly.mjs` | SQLite フルソース + vec1.c より再生成 | バンドラーフレンドリーブラウザローダー |
-| `downloads/sqlite-official/sqlite3-worker1-promiser.mjs` | SQLite フルソース + vec1.c より再生成 | 公式 Worker1 Promiser API ローダー |
-| `downloads/sqlite-official/sqlite3-opfs-async-proxy.js` | SQLite フルソース + vec1.c より再生成 | OPFS 非同期プロキシスクリプト |
+| `downloads/vec1.c` | SQLite 公式 vec1 Fossil リポジトリ (`https://sqlite.org/vec1`)<br>URL: `https://sqlite.org/vec1/raw/vec1.c`（または trunk ソースツリー `ext/vec1/vec1.c`、`https://sqlite.org/vec1/file/vec1.c`） | vec1 0.8 C ソース（日付: 2026-02-04、`#define VEC1_VERSION "0.8"`、Scalar single-threaded 組み込み用） |
+| `downloads/sqlite-official/` | SQLite フルソース + vec1.c より再生成（8 ファイル） | SQLite 3.54.1 + vec1 0.8 組み込み完成ランタイム群：<br>- `sqlite3.wasm`<br>- `sqlite3-node.mjs`<br>- `sqlite3-bundler-friendly.mjs`<br>- `sqlite3.mjs`<br>- `sqlite3-opfs-async-proxy.js`<br>- `sqlite3-worker1.mjs`<br>- `sqlite3-worker1-bundler-friendly.mjs`<br>- `sqlite3-worker1-promiser.mjs` |
 | `downloads/sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz` | `https://codeload.github.com/sqlite/sqlite-wasm/tar.gz/ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a` | 公式 9 デモ検証用・ビルド済みローダー収録リポジトリアーカイブ |
 
 ---
