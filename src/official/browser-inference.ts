@@ -35,8 +35,8 @@ export function resolveOfficialBrowserAssets(
     throw new VectorError("E_ASSET_INTEGRITY");
   }
 
-  const worker = new URL("../workers/inference-browser.mjs", entry).href;
-  const manifest = new URL("../../manifests/embeddinggemma2-q4.json", entry).href;
+  const worker = new URL("./workers/inference-browser.mjs", entry).href;
+  const manifest = new URL("../manifests/embeddinggemma2-q4.json", entry).href;
 
   let resolvedModelBase: string;
   if (modelBase !== undefined) {
@@ -58,7 +58,7 @@ export function resolveOfficialBrowserAssets(
     }
     resolvedModelBase = base.href;
   } else {
-    resolvedModelBase = new URL(`../../model/embeddinggemma-2-ONNX/${MODEL_REVISION}/`, entry).href;
+    resolvedModelBase = new URL(`../model/embeddinggemma-2-ONNX/${MODEL_REVISION}/`, entry).href;
   }
 
   return {
