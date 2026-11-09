@@ -2,7 +2,7 @@
 
 ## 1. ビルド概要
 
-本プロジェクトのビルドは、以下の 2 段階で構成される：
+本プロジェクトのビルドは、以下の 2 段階で構成される（ビルド前に `node scripts/download-assets.mjs` および `npm run lock-assets` により入力資材および `manifests/embeddinggemma2-q4.json` が完全に検証・固定されていること）：
 1. **上流資材再生成**: SQLite 3.54.1 フルソース（`sqlite-src-3540100.zip`）および `vec1.c`（version 0.8）を入力とし、Emscripten SDK（`emscripten/emsdk:6.0.8`）環境を用いて C 言語レベルで静的組み込み（static auto-extension）した公式互換 Wasm モジュール群（8 ファイル）を生成する。
 2. **製品パッケージビルド**: 生成された SQLite 資材、ONNX Runtime、および Transformers.js を入力とし、TypeScript/esbuild を用いて高信頼な Node.js / ブラウザ向け配布パッケージを決定論的に生成する。
 
@@ -11,11 +11,18 @@
 ## 2. SQLite 再生成仕様 (`docker/sqlite-runtime-build`)
 
 公式配布のデモアーカイブ単体の Wasm には vec1 拡張が含まれていないため、隔離 Linux x64 コンテナ環境において以下の手順で SQLite 3.54.1 + vec1 0.8 組み込み Wasm を生成する。ビルドコンテナおよびホスト deb 依存関係の詳細要件は [linux-toolchain.md](linux-toolchain.md) を参照すること。
+ホスト環境からは `npm run build:sqlite`（`node scripts/build/sqlite-runtime.ts`）を実行することで、`docker/sqlite-runtime-build` 環境でのコンテナビルド・抽出・完了検証が一貫して自動実行される。
+
+### 2.0 再生成環境資材 (`docker/sqlite-runtime-build`)
+- `docker/sqlite-runtime-build/Dockerfile`: `emscripten/emsdk:6.0.8` をベースとするビルドコンテナイメージ
+- `docker/sqlite-runtime-build/build-sqlite.sh`: ホストツール展開、ソースパッチ適用、configure / make、成果物抽出・検証を実行するビルドスクリプト
+- `docker/sqlite-runtime-build/sqlite3_wasm_extra_init.c`: vec1 拡張および C 言語版 `DISTANCE` 関数を全 DB 接続へ自動登録する Wasm 初期化フック
+- `docker/sqlite-runtime-build/verify-sqlite.mjs`: 生成資材の `vec1_info()`、`DISTANCE`、768 次元 CRUD、`quick_check` を検証する完了検査スクリプト
 
 ### 2.1 入力資材と環境
 - **ビルドコンテナ環境**: `emscripten/emsdk:6.0.8`（Linux x64、詳細は [linux-toolchain.md](linux-toolchain.md)）
-- **SQLite フルソース**: `downloads/sqlite-src-3540100.zip`（VERSION=3.54.1、configure、ext/wasm/GNUmakefile を含む）
-- **vec1 C ソース**: `downloads/vec1.c`（またはソース同梱 `ext/vec1/vec1.c`。version 0.8 Scalar single-threaded）
+- **SQLite フルソース**: `downloads/sqlite-src-3540100.zip`（VERSION=3.54.1、configure、ext/wasm/GNUmakefile を含む。サイズ: 14,899,528 バイト、SHA-256: `387e7f6cad4797b17848c07d453dc6606917bb356a6cfe5a3abafd38c240c71b`）
+- **vec1 C ソース**: `downloads/vec1.c`（`sqlite-src-3540100.zip` の `sqlite-src-3540100/ext/vec1/vec1.c` から展開・抽出、または公式 vec1 0.8 C ソース。version 0.8 Scalar single-threaded。サイズ: 378,128 バイト、SHA-256: `a38c62274093bec34631831371ad433703d6dde7fa9ecd6088da4ed33d4a61f9`、`#define VEC1_VERSION "0.8"`。単体 URL 取得時の Browser Verification による HTML 誤取得・誤配置を防止する完全性検証必須）
 
 ### 2.2 ソース構成およびフック
 - `ext/wasm/vec1.c` としてソースを配置し、マクロ `#define VEC1_VERSION "0.8"`, `#define VEC1_STATIC 1`, `#define VEC1_THREADS 0` を設定。
@@ -27,11 +34,16 @@
 3. **JS capi sqlite3_bind_text**: Array 判定・連結の誤変数 `pMem` を `text` へ訂正し、文字列 allocation は `allocCString(text, true)` でポインタと長さを取得。
 4. **oo1 built-in trace / step 警告**: 固定 `SQLITE_TRACE_EVENT` とカウンタ、ステップ失敗警告は `SQLITE_STEP_FAILED` とエラーコードのみをログ出力。
 5. **OPFS void 参照**: 上流の未使用 local/catch/flags/lock を void 参照で安全に処理。
-6. **STRICT テーブルにおける VECTOR 型ネイティブ受容**: `sqlite3.c` のカラム型検証およびアフィニティ解決関数（`sqlite3ColumnType()` 等）に限定パッチを適用。型名先頭が `VECTOR`（case-insensitive）である宣言（例: `VECTOR(768, 'embeddinggemma-2')`）を `SQLITE_AFF_BLOB` アフィニティとして解決し、`STRICT` テーブルの型バリデーションを通過させる。これにより、TypeScript 側の DDL 前処理や文字列置換を不要とし、低レベル CAPI を含む全実行経路で `VECTOR` 型指定の DDL をネイティブに受理・実行可能とする。
+6. **STRICT テーブルにおける VECTOR 型ネイティブ受容とパーサー文法拡張**:
+   - **Lemon パーサー文法規則拡張 (`src/parse.y`)**: 上流 SQLite Lemon パーサーは型宣言の引数として数値（`signed`）しか受理しないため、第2引数にモデル名文字列（`STRING`）や識別子（`ids`）を含む宣言（例: `VECTOR(768, 'embeddinggemma-2')`）が文法エラーとなる。これを解決するため、`src/parse.y` の `typetoken` 規則に `typename(A) LP signed COMMA STRING RP` および `typename(A) LP signed COMMA ids RP` を追加し、Lemon パーサージェネレータにより `parse.c` / `parse.h` を再生成する。
+   - **カラム型登録とアフィニティ解決 (`src/build.c` / `sqlite3.c`)**: `sqlite3AddColumn` および `sqlite3AffinityType` において、型名先頭が `VECTOR`（case-insensitive）の列を `SQLITE_AFF_BLOB` アフィニティとして解決し、完全な型宣言文字列（例: `VECTOR(768, 'embeddinggemma-2')`）を `zType` に保持（`COLFLAG_HASTYPE` 維持）。
+   - **STRICT 列型検証の受容と BLOB 型制約 (`src/build.c` / `sqlite3.c`)**: `sqlite3EndTable` の `TF_Strict` 検証において、型名先頭が `VECTOR`（case-insensitive）である列を未知の型（`COLTYPE_CUSTOM`）エラーとせず BLOB 型としてネイティブに受容。実行時は STRICT の BLOB 型制約を適用し、BLOB 以外のデータ型（INTEGER, REAL, TEXT）の代入を拒否する。
+   - これにより、TypeScript 側の DDL 前処理・文字列置換を完全に排除し、低レベル CAPI を含む全実行経路で `VECTOR` 型 DDL のネイティブ受理、`PRAGMA table_info` / `sqlite_schema` での完全宣言文字列保持、および再オープン後の永続性を保証する。
 
 ### 2.4 ビルドコマンドと生成成果物
 - `./configure --disable-readline --disable-tcl`
-- `make sqlite3.c` により amalgamation を生成
+- `make sqlite3.c` 実行前に、`src/parse.y` への Lemon 文法規則追加および `src/build.c` へのパッチを適用し、Lemon による再生成を経て `make sqlite3.c` により amalgamation を生成
+- 生成された `sqlite3.c` における STRICT VECTOR 型パッチおよびアフィニティ解決の整合性を検証・補正
 - `cd ext/wasm && make -j2 npm bin.wasm-opt=`（Emscripten 最適化を維持しつつ追加 wasm-opt を無効化）
 - 生成された `npm-bundle.zip` より以下の 8 ファイルを `downloads/sqlite-official/` へ配置：
   - `sqlite3.wasm` (SQLite 3.54.1 + vec1 0.8 組み込み)
@@ -42,7 +54,7 @@
   - `sqlite3-worker1.mjs`
   - `sqlite3-worker1-bundler-friendly.mjs`
   - `sqlite3-worker1-promiser.mjs`
-- **完了検証**: 同梱 Node.js により `vec1_info()` が `"version 0.8 (Scalar, single-threaded)"` を返し、`DISTANCE`、768 次元 flat/CRUD、`quick_check` が PASS することを確認して完了とする。
+- **完了検証**: 同梱 Node.js により `vec1_info()` が `"version 0.8 (Scalar, single-threaded)"` を返し、`DISTANCE`、`VECTOR(768, 'embeddinggemma-2') STRICT` DDL の CAPI 直接実行、STRICT BLOB 型制約（TEXT 等の代入拒否）、`PRAGMA table_info` 型文字列保持、再オープン後スキーマ復元、768 次元 flat/CRUD、`quick_check` が PASS することを確認して完了とする。
 
 ---
 
@@ -87,19 +99,28 @@
   - `resize.wasm` (`@jsquash/resize`)
 
 ### 4.2 Transformers.js のパッチ適用とバンドル
-`node_modules/@huggingface/transformers` を作業領域にコピーし、以下のパッチを適用してバンドルを生成する：
+`node_modules/@huggingface/transformers`（固定バージョン 4.3.1）をステージング作業領域（`.build/staging/transformers-portable` および `.build/staging/transformers-directml`）にコピーし、`git apply --unidiff-zero --ignore-space-change --ignore-whitespace` コマンドにより以下のパッチを適用して各推論バンドルを生成する。パッチファイルが存在しない場合や適用に失敗した場合は即座にビルドを中止する。パッチの省略、別版への差し替え、実行時自動フォールバックによる成功扱いは禁止する。
 
 1. **Portable パッチ (`patches/transformers-portable.patch`)**:
-   - Node.js 環境での Wasm 実行時、スレッド数設定がデフォルトのままだと `onnxruntime-web` が動的 blob URL (`blob:...`) によるワーカーインポートを試みて Node.js の ESM ローダーで例外となる問題を防止。
-   - `env.backends.onnx = ONNX_ENV;` により直接参照を保持し、外部からの `numThreads: 1` 注入を内部へ確実に反映させる。
-   - 直列化プロミスチェーンにおける例外連鎖を防止（前の推論失敗が後続推論をブロックしないよう分離）。
+   - **適用対象**: `src/backends/onnx.js`, `src/utils/model-loader.js`
+   - **Node.js ESM 動的 URL 回避 & スレッド数設定の完全反映**:
+     上流コードの `env.backends.onnx = { ...ONNX_ENV, setLogLevel };` によるオブジェクト複製を排除し、`env.backends.onnx = ONNX_ENV;` により直接参照結合を行う。これにより、Node.js 実行環境で外部から注入される `env.backends.onnx.wasm.numThreads = 1` が ONNX Runtime Web 内部へ確実に伝播し、マルチスレッド時に発生する動的 `blob:` URL (`URL.createObjectURL`) によるワーカーインポート（Node ESM ローダーの `ERR_UNSUPPORTED_ESM_URL_SCHEME` 例外）を完全に抑止する。
+   - **例外連鎖の分離（プロミスチェーンの独立性保護）**:
+     セッション作成キュー (`webInitChain`) および推論実行キュー (`webInferenceChain`) において、先行タスクの拒否（rejection）が後続タスクへ連鎖しないようエラー分離ハンドラを導入。前の推論失敗によってキュー全体が rejected 状態となり後続推論が恒久的にブロックされる障害を防止する。また、ブラウザ環境（`apis.IS_WEB_ENV`）のみならず Node portable 経路でも同等の直列化・例外分離を適用する。
+   - **メモリバッファ供給の維持（`return_path` 最適化の無効化）**:
+     `src/utils/model-loader.js` の `const return_path = apis.IS_NODE_ENV;` を無効化し、常に入力モデル資材を Uint8Array メモリバッファおよび externalData（`{path, data}`）として供給する。ファイルシステムパス直接参照への迂回を抑止し、メモリ内キャッシュおよび検証済みキャッシュとの連携を保証する。
+
 2. **DirectML パッチ (`patches/transformers-directml.patch`)**:
-   - `Symbol.for('onnxruntime')` 注入時にも `supportedDevices.push('dml', 'cpu'); defaultDevices = ['dml'];` を設定し、DirectML デバイス認識を有効化。
+   - **適用対象**: `src/backends/onnx.js`
+   - **Symbol 注入時の DirectML デバイス認識有効化**:
+     グローバルシンボル `Symbol.for('onnxruntime')` が注入された診断・Native ORT 環境下において、デバイス判定ロジックに DirectML デバイス登録を追加（`supportedDevices.push('dml', 'cpu'); defaultDevices = ['dml'];`）。
+   - **DirectML 優先実行とフォールバック抑止**:
+     Windows x64 環境下で DirectML (`dml`) を優先デバイスとして認識・選択させ、GPU テンソル計算を確実に起動する。CPU への無言のフォールバックを禁止し、DirectML が利用できない環境では環境エラー（`E_ENVIRONMENT`）として厳格に分離する。
 
 ### 4.3 生成される推論バンドル
-- `dist/vendor/transformers-portable-node.js`: Node.js Wasm 向け CJS バンドル
-- `dist/vendor/transformers-portable.mjs`: ブラウザ Wasm/WebGPU 向け ESM バンドル (Node builtin モジュールを空スタブ解決)
-- `dist/vendor/transformers-directml-node.js`: Node.js DirectML 向け CJS バンドル (`onnxruntime-node` は external 解決)
+- `dist/vendor/transformers-portable-node.js`: Node.js Wasm 向け CJS バンドル（`node:url` pathToFileURL banner 注入、画像 codec は自前 `src/inference/image.ts` へ解決）
+- `dist/vendor/transformers-portable.mjs`: ブラウザ Wasm/WebGPU 向け ESM バンドル（Node builtin モジュールを空スタブ解決、画像 codec は自前 `src/inference/image.ts` へ解決）
+- `dist/vendor/transformers-directml-node.js`: Node.js DirectML 向け CJS バンドル（`onnxruntime-node` は external 解決、画像 codec は自前 `src/inference/image.ts` へ解決）
 
 ---
 
@@ -126,6 +147,14 @@ esbuild で CJS 形式でバンドルする際、以下の設定を施す：
 ### 5.3 Wasm ファイル配置と自動検出 (`locateFile`)
 `dist/sqlite3.wasm` はパッケージルートおよび各エントリポイントから参照される。
 `src/official/node.ts` の `locateFile` オプションにより、カレントディレクトリ、`dist/`、またはモジュール相対パスから実在する絶対パスを自動検出して SQLite ランタイムへ渡す。
+
+### 5.4 ランタイムロックとパッチ完全性記録 (`manifests/runtime-lock.json`)
+ビルド工程の最終段階（`[5/5]`）において、`scripts/build/package.ts` は使用した全資材およびパッチファイルの完全性を固定するロックファイル `manifests/runtime-lock.json`（および `dist/runtime-lock.json`）を生成する。
+- 必須記録パッチ（`patches`）:
+  - `patches/transformers-portable.patch`: バイト数および SHA-256
+  - `patches/transformers-directml.patch`: バイト数および SHA-256
+  - `patches/sqlite-official.patch`: バイト数および SHA-256
+- パッチファイルが存在しない、あるいは SHA-256 が一致しない場合はビルドを即座にエラー停止（exit code 1）とする。各環境での決定論的再現性を保証し、未検証パッチやパッチ欠落のまま配布物が生成されることを防ぐ。
 
 ---
 

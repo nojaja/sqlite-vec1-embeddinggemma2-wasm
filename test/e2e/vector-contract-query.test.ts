@@ -40,6 +40,7 @@ describe("G05 E2E: Specification Contract Query Execution", () => {
         expect(result.status).toBe(0);
         expect(result.stdout).toContain("CREATE TABLE documents");
         expect(result.stdout).toContain("VECTOR(768 , 'embeddinggemma-2')");
+        expect(result.stdout).toContain("STRICT");
         expect(result.stdout).toContain("契約クエリの完全一致実行に成功しました！");
       });
 

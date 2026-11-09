@@ -68,9 +68,12 @@ engine.attachは一度だけ。closedまたは二重attach、未attachのembed�
 
 ### 2.1 Portable互換処理
 
-Transformers.js (`@huggingface/transformers`) を private staging へ配置し、Node portable経路からonnxruntime-nodeとsharp importを除去する。Node環境自体を偽装せず、device許可とruntime選択だけをwasmへ限定する。session作成/run queueは直列化し、rejectionが次の正常要求へ連鎖しないようにする。`patches/transformers-portable.patch` により、Node.js 環境での動的 `blob:` URL のインポート失敗を防ぐ `numThreads = 1` 参照反映と、直列化プロミスチェーンでの例外連鎖防止、`return_path` 最適化の無効化（Uint8Array メモリバッファ供給）を確実に適用する。
+Transformers.js (`@huggingface/transformers` 4.3.1) を private staging へ配置し、Node portable経路からonnxruntime-nodeとsharp importを除去する。Node環境自体を偽装せず、device許可とruntime選択だけをwasmへ限定する。session作成/run queueは直列化し、rejectionが次の正常要求へ連鎖しないようにする。`patches/transformers-portable.patch` により、以下の 3 点を決定論的に適用・保証する：
+1. **スレッド数同期と動的 URL 抑止**: `env.backends.onnx = ONNX_ENV` の直接参照結合により、Node.js 環境で外部注入された `env.backends.onnx.wasm.numThreads = 1` を内部へ確実に浸透させ、動的 `blob:` URL のインポート（Node ESM ローダーの `ERR_UNSUPPORTED_ESM_URL_SCHEME` 例外）を完全に防ぐ。
+2. **例外連鎖の分離**: セッション作成キュー (`webInitChain`) および推論実行キュー (`webInferenceChain`) において、先行タスクのエラー・rejection が後続の独立した推論タスクへ波及しないようキューの回復性を確保し、Node portable 経路でも同等の直列化・例外分離を行う。
+3. **メモリバッファ供給の強制**: `src/utils/model-loader.js` の `return_path` 最適化を無効化（`return_path = false`）し、core graph を Uint8Array、externalData を `{path, data}` bytes として供給する。
 
-core graphをUint8Array、externalDataを `{path,data}` bytesで供給する。native向けreturn_path最適化をportable経路で無効にする。external data名はgraphの相対名であり、cache絶対pathではない。RawImageを第3節のportable adapterへ置換し、sessionの上流error loggingからtensor/入力を除く。browser bundleへNode builtin/native依存を到達させない。
+external data名はgraphの相対名であり、cache絶対pathではない。RawImageを第3節のportable adapterへ置換し、sessionの上流error loggingからtensor/入力を除く。browser bundleへNode builtin/native依存を到達させない。パッチ未適用のままのビルドや、別版への差し替え、実行時フォールバックによる成功扱いは禁止する。
 
 ## 3. 画像前処理
 
@@ -102,6 +105,7 @@ rootは `bin/napi-v6/win32/x64/`。
 | `onnxruntime_binding.node` | 358200 | `8d9f996ff7dcc60c4899aa87aa7abe07d806f9c314882f44a001d0fd8a23d16f` |
 
 推論Workerで再検証してrequireし、listSupportedBackendsにname=dmlかつbundled=trueがあることを確認する。private DirectML bundleだけがnative依存をexternalとして参照する。portable Nodeとbrowserは参照しない。製品tarballへnative fileを複製しない。
+DirectML バンドル生成時は `patches/transformers-directml.patch` を適用し、`Symbol.for('onnxruntime')` が注入された状態でも `supportedDevices.push('dml', 'cpu'); defaultDevices = ['dml'];` により DirectML を優先デバイスとして選択させる。DirectML 実行不能時に CPU へ自動切替（フォールバック）して成功扱いにすることは禁止し、即座に `E_ENVIRONMENT` で処理を停止する。各 backend の実推論および Wasm パリティ（コサイン類似度 >= 0.999）を検証する。
 
 ### 4.2 sessionとgraph
 

@@ -176,7 +176,7 @@ EmbeddingQualityPairはid/modality=textまたはimage/candidate:Float32Array/ref
 | path | exportと受入 |
 | --- | --- |
 | `tooling/assets/model-lock.ts` | ModelLicenseEvidence、validateModelLicenseEvidence(evidence):void。idは小文字SPDX相当、README.md/LICENSE path固定、正size、小文字64桁hash |
-| `tooling/assets/runtime-lock.ts` | RuntimeAssetLock、RuntimePatchLock、RuntimeLock、REQUIRED_RUNTIME_ASSETS、REQUIRED_RUNTIME_PATCHES、validateRuntimeLock(lock):void |
+| `tooling/assets/runtime-lock.ts` | RuntimeAssetLock、RuntimePatchLock、RuntimeLock、REQUIRED_RUNTIME_ASSETS、REQUIRED_RUNTIME_PATCHES（`patches/transformers-portable.patch`, `patches/transformers-directml.patch`, `patches/sqlite-official.patch`）、validateRuntimeLock(lock):void |
 | `tooling/release/release-audit.ts` | ReleaseAuditSummary={info,low,moderate,high,critical,total}、validateReleaseAudit(summary):void。全値safe integer>=0、合計整合、全0以外拒否 |
 | `tooling/quality/sqlite-wasm-compat.ts` | sqliteWasmDemoCases、verifyDemoRows(actual,expected):void。長さ/順序/値の完全一致。不一致SQLITE_WASM_DEMO_RESULT_MISMATCH |
 | `tooling/quality/sqlite-demo-bundlers.ts` | buildWebpackDemo(root,loader)、buildParcelDemo(root,loader)、buildRsbuildDemo(root,loader):Promise<string>、serveSqliteDemo(root):Promise<{server,origin}> |
@@ -184,7 +184,7 @@ EmbeddingQualityPairはid/modality=textまたはimage/candidate:Float32Array/ref
 | `scripts/release/package-contract.ts` | requiredPackageFiles、auditPackageFiles(root):Promise<PackageAuditReport>、createCycloneDxSbom(version,inputs)、isFile(filename):Promise<boolean> |
 | `test/integration/search-gate-helpers.ts` | decodeFloat32LittleEndian(bytes)、cosineDistance(left,right)、rankFlat(candidates,query,k) |
 
-runtime asset revisionは数字、v任意の数値版、version-X、40桁commit等のimmutable形式。mutableなbranch/latestを拒否する。name/licenseは英数先頭の安全識別子。HTTPS以外のsourceは許可downloads/docker module pathだけ。完成buildにbytes/hashが存在しても拒否する。他資材はbytes/hash必須。optional integrityはsha512-base64。必須24asset/2patch欠落、duplicate name/path、patch traversal、toolchain不正はE_ASSET_INTEGRITY。
+runtime asset revisionは数字、v任意の数値版、version-X、40桁commit等のimmutable形式。mutableなbranch/latestを拒否する。name/licenseは英数先頭の安全識別子。HTTPS以外のsourceは許可downloads/docker module pathだけ。完成buildにbytes/hashが存在しても拒否する。他資材はbytes/hash必須。optional integrityはsha512-base64。必須24asset/3patch欠落、duplicate name/path、patch traversal、toolchain不正はE_ASSET_INTEGRITY。
 
 DockerOrtBuildReportはstage/status/runToken/fullLto/files/demo。stage=ort-web-wasm-build2、status=passed、UUID v1..5、標準buildはfullLto=false、demo=demo/index.html、filesは4file名stringまたは{name}の配列。fullLtoはCMake cacheだけで決めず、同runの生成Ninjaと実compile/link flagsで判定する。明示ONの検証buildだけtrueを許可し、full `-flto` のcompile/link適用と `-flto=thin` 不使用を要求する。output/demo mapsも各4件で同じrunのcopy一致、Wasm validate、loader非空を要求する。過去のdigest一致を条件にしない。
 

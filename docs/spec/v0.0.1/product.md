@@ -109,11 +109,20 @@ CREATE TABLE documents (
 ```
 
 ##### 独自SQL parser禁止の厳守と C 言語パッチ・公式APIによるメタデータ取得方式
-「1. 製品境界」に定める独自SQL parser新設禁止を厳守し、テーブル定義やスキーマの解析にフルASTを構築する独自構文解析器を用いない。SQLite C 言語レベルの限定パッチおよび公式機構・CAPI機能に限定して実装する：
-1. **SQLite C レベル限定パッチによる STRICT テーブルの VECTOR 型ネイティブ受容**:
-   - SQLite の `STRICT` テーブルは既定で `INT, INTEGER, REAL, TEXT, BLOB, ANY` 以外の未知の型名を構文エラーとして拒否する。
-   - 本製品では SQLite C ソース（`sqlite3.c`）のカラム型検査・アフィニティ解決関数（`sqlite3ColumnType()` 等）に限定上流パッチを適用し、`VECTOR` で始まる型名を `SQLITE_AFF_BLOB` アフィニティとして直接受理させる（[build.md](build.md#23-c-レベル限定互換変更) 参照）。
-   - これにより、TypeScript 側で DDL 文字列の再パースや正規表現によるキーワード置換を行うことなく、SQLite 公式 Lemon パーサーが `VECTOR(...)` をネイティブに直接パース・受理する。低レベル CAPI（`sqlite3_exec` 等）から直接発行された DDL も完全に透過的に機能する。
+「1. 製品境界」に定める独自SQL parser新設禁止を厳守し、テーブル定義やスキーマの解析にフルASTを構築する独自構文解析器を用いない。SQLite C 言語レベルの限定パッチ（Lemon パーサー文法拡張および STRICT 列型検証）と公式機構・CAPI機能に限定して実装する：
+1. **SQLite C レベル限定パッチによる Lemon 文法拡張と STRICT テーブルの VECTOR 型ネイティブ受容**:
+   - **Lemon パーサー文法規則の拡張（`src/parse.y`）**:
+     - SQLite 公式の Lemon パーサー文法（`src/parse.y` の `typetoken` 規則）は、型引数として数値（`signed`）のみを許容しており、文字列リテラルや識別子を含む型宣言を Lemon パーサーの構文解析段階で文法エラー（`near "...": syntax error`）として拒否する。
+     - 本製品では `src/parse.y` に文法規則（`typename(A) LP signed COMMA STRING RP` および `typename(A) LP signed COMMA ids RP`）を追加し、`VECTOR(768, 'embeddinggemma-2')` やクォートなしの `VECTOR(512, bekko)` 等のモデル名指定を含む型宣言を Lemon パーサーがネイティブに構文受理するよう拡張する。
+   - **アフィニティ解決と宣言型文字列の完全保持（`src/build.c` / `sqlite3.c`）**:
+     - カラム追加処理（`sqlite3AddColumn`）およびアフィニティ解決関数（`sqlite3AffinityType`）において、型名先頭が `VECTOR`（case-insensitive）である列を `SQLITE_AFF_BLOB` アフィニティとして解決する。
+     - 同時に、元の宣言型文字列全体（例: `VECTOR(768, 'embeddinggemma-2')`）をカラム情報（`zType`）にそのまま保持し、型指定フラグ（`COLFLAG_HASTYPE`）を設定する。
+   - **STRICT テーブルにおける列型検査の受容と BLOB 型制約の厳格適用**:
+     - SQLite の `STRICT` テーブルは既定で `INT, INTEGER, REAL, TEXT, BLOB, ANY` 以外の型（`COLTYPE_CUSTOM`）を未知の型として拒否するが、型名先頭が `VECTOR`（case-insensitive）である列を BLOB 型相当として例外受容し、テーブル作成を通過させる。
+     - STRICT テーブルの実行時バリデーション（INSERT / UPDATE 時の型検証）においては `SQLITE_AFF_BLOB`（BLOB 型制約）が適用され、BLOB 以外のデータ型（INTEGER, REAL, TEXT）の代入は SQLite コアによって厳格に拒否される。
+   - **透過的な CAPI 実行とスキーマ永続性**:
+     - これにより、TypeScript 側で DDL 文字列の再パースや正規表現によるキーワード置換・除去を一切行うことなく、低レベル CAPI（`sqlite3_exec` 等）から直接発行された DDL も完全に透過的に機能する。
+     - データベース再オープン後も `sqlite_schema` から元の型宣言が完全に復元され、PRAGMA 経由でのメタデータ取得が維持される。
 2. **公式カタログおよびPRAGMAによるメタデータ抽出**:
    - テーブル作成時および接続初期化時、ライブラリは `sqlite_schema`（旧 `sqlite_master`）テーブルまたは `PRAGMA table_info(tableName)` / `PRAGMA table_xinfo(tableName)` を実行し、SQLite 自身が構文解析・保持した正規化カラム名と宣言型（`type` 文字列、例: `VECTOR(768, 'embeddinggemma-2')`）を取得する。
 3. **型定義トークンの抽出（非パーサー）**:

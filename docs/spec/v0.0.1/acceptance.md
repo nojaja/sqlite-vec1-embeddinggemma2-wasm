@@ -5,10 +5,11 @@
 本プロジェクトの品質保証は、**「既存のテストコードを変更することなく、すべてのテストが green になること」** を厳格な受入基準とする。
 
 検証は以下の順序で進行する：
-1. **固定資材の配置点検**: `npm run test:assets` により、全 11 モデル資材および公式成果物の存在と完全性を確認する。
+1. **固定資材の配置点検と完全性ロック**: `npm run lock-assets` および `node scripts/download-assets.mjs` により、全 11 モデル資材、正準マニフェスト（`manifests/embeddinggemma2-q4.json`）、公式 SQLite/vec1 ビルド入力資材の存在と完全性を確認・ロックする。
 2. **製品ビルド**: `npm run build` により、推論バンドル・公式 SQLite 資材・製品エントリポイント・型定義が欠落なく生成されることを確認する。
-3. **単体テストスイート**: `npm test` により、35 ファイル・201 テストすべてが PASS することを確認する。
-4. **統合テスト・機能ゲート**:
+3. **実資材統合試験ゲート (G05)**: 製品モジュール（`src/runtime-assets/model-contract`、`src/sqlite/node-model-cache`）連携のもと `npm run test:assets` を実行し、実モデルのオンライン取得、オフラインキャッシュ、破損拒否・修復、並行取得排他が PASS することを確認する。
+4. **単体テストスイート**: `npm test` により、36 ファイル・208 テストすべてが PASS することを確認する。
+5. **統合テスト・機能ゲート**:
    - `npm run test:sqlite`: 公式 UDF、未準備短絡、`_svw_meta` 非作成要件、vec1 テーブル動作
    - `npm run test:storage`: `node-file` VFS CRUD、排他ロック、クラッシュ復旧、メタデータ保護
    - `npm run test:search`: 実モデル検索、キャッシュ増分整合性 (`actualInference`)
@@ -25,7 +26,7 @@
 
 ## 2. 同梱試験の範囲
 
-unit は 35 ファイル、E2E は 4 ファイル、統合テストを含め `test/` 配下に配置されている。
+unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `test/` 配下に配置されている。
 - 列挙: `npm test -- --listTests`
 - 単体テスト実行: `npm test`
 - 単体カバレッジ: `npm run test:ci`
@@ -72,7 +73,8 @@ unit は 35 ファイル、E2E は 4 ファイル、統合テストを含め `te
 | `release-audit.test.ts` | 全 severity 0 のみ受理、件数不正/不整合/脆弱性を拒否 |
 | `statement-embedding-cache.test.ts` | copy、用途/title/key、10/11 LRU、画像全 bytes、実 32MiB、超過 bypass、NULL/error 非保存 |
 | `statement-lifecycle.test.ts` | ROW 保持/DONE/reset 世代、交互接続/Stmt、close/finalize/error、pause 期限/cancel |
-| `vector-type-and-model-resolution-spec.test.ts` | VECTOR 型 DDL 解析、[model] 自動解決、動的プロファイル、ゼロダウンロード、推論事前準備・warm-up保証（省略時ゼロオーバーヘッド） |
+| `vector-type-and-model-resolution-spec.test.ts` | VECTOR 型 DDL（Lemonパーサー文法拡張・STRICT BLOB型制約・完全宣言保持）解析、[model] 自動解決、動的プロファイル、ゼロダウンロード、推論事前準備・warm-up保証（省略時ゼロオーバーヘッド） |
+| `vector-type-grammar-and-strict.test.ts` | Lemon パーサー文法規則拡張（文字列/識別子引数受理）、STRICT テーブルでの BLOB 型制約（BLOB 以外拒否）、完全宣言文字列保持・再オープン復元、CAPI 透過投入 |
 | `verified-cache.test.ts` | 2 prefix だけ、未知 key、毎 read size/hash、put は同内容だけ |
 
 ---
@@ -108,7 +110,11 @@ unit は 35 ファイル、E2E は 4 ファイル、統合テストを含め `te
 3. **ブラウザ WebGPU 実推論 (`test/e2e/browser-inference.test.ts`)**:
    - MS Edge ブラウザ環境で WebGPU アダプター/デバイスが正常に取得され、テキストクエリおよび画像埋め込みの実推論が完了すること。
 4. **仕様契約クエリ実推論 (`test/e2e/vector-contract-query.test.ts`)**:
-   - `VECTOR(768 , 'embeddinggemma-2') STRICT` テーブル定義が透過的に作成されること。
+   - `VECTOR(768 , 'embeddinggemma-2') STRICT` テーブル定義が Lemon 文法解析および STRICT 列型検証を通過し、TypeScript 側での置換なしにネイティブ・透過的に作成されること。
+   - `PRAGMA table_info` および `sqlite_schema` において型宣言文字列 `VECTOR(768 , 'embeddinggemma-2')` が完全保持されること。
+   - STRICT テーブルの型制約として、`VECTOR` 列への BLOB 以外の型（TEXT, INTEGER 等）の INSERT が拒否され、Float32 ベクトル BLOB が正常に受容されること。
+   - データベース再オープン後もスキーマから完全な型定義が復元され、モデル自動解決が機能すること。
+   - 低レベル CAPI（`sqlite3.capi.sqlite3_exec`）から DDL を直接実行しても文法エラーとならず `SQLITE_OK` で受理されること。
    - `INSERT INTO documents(id,text_data,embedding) VALUES(1,:text,embedding(:text));` によるベクトル埋め込みの生成と保存。
    - `SELECT id,text_data FROM documents ORDER BY DISTANCE(embedding,embedding_query(:query)),id LIMIT 3;` によるコサイン距離順セマンティック検索で期待される文書が最上位に抽出されること。
 5. **vec1 ネイティブ仮想テーブル動作の厳格検証要件**:

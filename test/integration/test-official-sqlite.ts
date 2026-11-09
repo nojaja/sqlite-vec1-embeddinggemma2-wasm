@@ -28,7 +28,7 @@ async function testOfficialSqlite(): Promise<void> {
     database.exec("CREATE VIRTUAL TABLE vectors USING vec1(vector); INSERT INTO vectors(cmd,arg) VALUES('rebuild','{\"index\":\"flat\",\"distance\":\"cos\"}')");
     const schemaSql = String(database.selectValue("SELECT sql FROM sqlite_schema WHERE name='vectors'"));
     assert.match(schemaSql, /CREATE\s+VIRTUAL\s+TABLE\s+.*USING\s+vec1/i);
-    // TypeScript ラッパーを介さない低レベル CAPI 直接実行検証
+    // TypeScript ラッパーを介さない低レベル CAPI 直接実行検証 (vec1 仮想テーブル)
     const capiRc = sqlite3.capi.sqlite3_exec(
       database,
       "CREATE VIRTUAL TABLE _raw_native_vec USING vec1(v);",
@@ -37,7 +37,36 @@ async function testOfficialSqlite(): Promise<void> {
       0
     );
     assert.equal(capiRc, 0);
+
+    // 仕様契約: Lemonパーサー文法拡張およびSTRICTテーブルでのVECTOR型ネイティブ受容 (CAPI直接実行)
+    const capiVectorDdlRc = sqlite3.capi.sqlite3_exec(
+      database,
+      "CREATE TABLE docs (id INTEGER PRIMARY KEY, text_data TEXT NOT NULL, embedding VECTOR(768 , 'embeddinggemma-2')) STRICT;",
+      0,
+      0,
+      0
+    );
+    assert.equal(capiVectorDdlRc, 0);
+
+    // スキーマ保持検証: sqlite_schema および PRAGMA table_info で完全な型宣言文字列が返ること
+    const docsDdl = String(database.selectValue("SELECT sql FROM sqlite_schema WHERE name='docs'"));
+    assert.match(docsDdl, /VECTOR\(768\s*,\s*'embeddinggemma-2'\)/i);
+
+    const pragmaRows = database.selectObjects("PRAGMA table_info('docs')") as Array<{ name: string; type: string }>;
+    const embeddingCol = pragmaRows.find((col) => col.name === "embedding");
+    assert.ok(embeddingCol, "embedding column must exist in docs");
+    assert.equal(embeddingCol?.type, "VECTOR(768 , 'embeddinggemma-2')");
+
     const vector = new Uint8Array(3072); new DataView(vector.buffer).setFloat32(0, 1, true);
+
+    // STRICT BLOB型制約検証: BLOB以外の型（TEXT等）の代入は拒否され、BLOBのみ受容されること
+    assert.throws(
+      () => database.exec({ sql: "INSERT INTO docs(id, text_data, embedding) VALUES(1, 'sample', 'invalid-text-vector')" }),
+      /cannot store TEXT value in BLOB column|datatype mismatch/i
+    );
+    database.exec({ sql: "INSERT INTO docs(id, text_data, embedding) VALUES(1, 'sample', ?)", bind: [vector] });
+    const insertedEmbedding = database.selectValue("SELECT embedding FROM docs WHERE id=1") as Uint8Array;
+    assert.equal(insertedEmbedding.byteLength, 3072);
     database.exec({ sql: "INSERT INTO vectors(rowid,vector) VALUES(1,?)", bind: [vector] });
     assert.ok(Math.abs(Number(database.selectValue("SELECT DISTANCE(?,?)", [vector, vector]))) < 1e-6);
     database.exec({ sql: "UPDATE vectors SET vector=? WHERE rowid=1", bind: [vector] });

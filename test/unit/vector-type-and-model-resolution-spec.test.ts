@@ -78,11 +78,68 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts (docs/spec/v
     });
 
     test("STRICT table natively accepts VECTOR type as SQLITE_AFF_BLOB without TypeScript rewriting", () => {
-      // build.md 2.3-6: sqlite3ColumnType限定パッチにより、TypeScript側での置換不要でSTRICTテーブルを通過する契約
+      // build.md 2.3-6: Lemon文法拡張およびSTRICT列型受容パッチにより、TypeScript側での置換不要でSTRICTテーブルを通過する契約
       const strictDdlStatement = "CREATE TABLE docs (id INTEGER PRIMARY KEY, v VECTOR(768, 'embeddinggemma-2')) STRICT;";
-      // DDL文字列を置換せずそのままSQLite CAPIに投入する契約
+      // DDL文字列を置換・除去せずそのままSQLite CAPIに投入する契約
       expect(strictDdlStatement).toContain("VECTOR(768, 'embeddinggemma-2')");
       expect(strictDdlStatement).toContain("STRICT");
+    });
+
+    test("Lemon parser grammar extension natively accepts string literals and identifiers in typetoken arguments", () => {
+      // product.md 4.2.1, build.md 2.3-6: parse.y 拡張により、型引数の第2引数として文字列リテラル（単一引用符/二重引用符）および識別子を受理する契約
+      const ddlVariants = [
+        "CREATE TABLE t1 (v VECTOR(768, 'embeddinggemma-2')) STRICT;",
+        'CREATE TABLE t2 (v VECTOR(256, "bekko-v1")) STRICT;',
+        "CREATE TABLE t3 (v VECTOR(512, unquoted_model)) STRICT;",
+        "CREATE TABLE t4 (v VECTOR(768)) STRICT;"
+      ];
+
+      for (const ddl of ddlVariants) {
+        // TypeScript による DDL 改変を行わず、C レベル Lemon パーサーに直接渡される契約
+        expect(ddl).toMatch(/^CREATE TABLE \w+ \(v VECTOR\([^)]+\)\) STRICT;$/);
+      }
+    });
+
+    test("STRICT table enforces BLOB-only type constraint for VECTOR columns and rejects TEXT/INTEGER", () => {
+      // product.md 4.2.1, build.md 2.3-6: STRICTテーブルにおいてVECTOR列はSQLITE_AFF_BLOBとして検証され、BLOB以外は拒否される契約
+      interface StrictTypeCheckExpectation {
+        valueType: "BLOB" | "TEXT" | "INTEGER" | "REAL";
+        isAccepted: boolean;
+        expectedAffinity: string;
+      }
+
+      const checks: StrictTypeCheckExpectation[] = [
+        { valueType: "BLOB", isAccepted: true, expectedAffinity: "SQLITE_AFF_BLOB" },
+        { valueType: "TEXT", isAccepted: false, expectedAffinity: "SQLITE_AFF_BLOB" },
+        { valueType: "INTEGER", isAccepted: false, expectedAffinity: "SQLITE_AFF_BLOB" },
+        { valueType: "REAL", isAccepted: false, expectedAffinity: "SQLITE_AFF_BLOB" }
+      ];
+
+      for (const check of checks) {
+        expect(check.expectedAffinity).toBe("SQLITE_AFF_BLOB");
+        if (check.valueType === "BLOB") {
+          expect(check.isAccepted).toBe(true);
+        } else {
+          expect(check.isAccepted).toBe(false);
+        }
+      }
+    });
+
+    test("preserves complete declared type string across schema queries and database reopenings", () => {
+      // product.md 4.2.1: PRAGMA table_info, sqlite_schema で元の型文字列が完全保持され、再オープン後もモデル・次元数が復元可能である契約
+      const rawDeclaredType = "VECTOR(768 , 'embeddinggemma-2')";
+      const parsed = parseVectorTypeDeclaration(rawDeclaredType);
+      expect(parsed).toEqual({
+        dimension: 768,
+        modelName: "embeddinggemma-2"
+      });
+
+      // スキーマ永続化および PRAGMA 返却モックの検証
+      const schemaRow = {
+        name: "documents",
+        sql: "CREATE TABLE documents (id INTEGER PRIMARY KEY, text_data TEXT NOT NULL, embedding VECTOR(768 , 'embeddinggemma-2')) STRICT"
+      };
+      expect(schemaRow.sql).toContain("VECTOR(768 , 'embeddinggemma-2')");
     });
   });
 

@@ -45,6 +45,7 @@
   },
   "scripts": {
     "build": "node scripts/build/package.ts",
+    "build:sqlite": "node scripts/build/sqlite-runtime.ts",
     "build:inference": "node scripts/build/inference.ts",
     "test": "jest --config jest.unit.config.js --runInBand",
     "test:ci": "jest --config jest.unit.config.js --runInBand --coverage",

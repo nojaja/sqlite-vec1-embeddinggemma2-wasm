@@ -6,7 +6,7 @@
 
 基準の生成処理が直接使う資材に限定する。汎用Debian rootfsを構築するためのAPT bootstrap、build-essential、Tcl dev、Python venv、Git/curl等の追加一律取得は不要である。取得hostのNode/npm/Git/curlと、Linux x64/glibc基盤のsh/ar/tar/unzip等は環境の前提とし、搬入する資材と混同しない。
 
-host debはOS全体へinstallせずrun専用directoryへ展開する。基盤glibcを上書きしない。基準処理が使う94配置pathは、重複を除くと85種類のdebである。同じfileを再取得する必要はないが、3集合の相対保存先は維持する。
+host debはOS全体へinstallせずrun専用directoryへ展開する。基盤glibcを上書きしない。基準処理が使う90配置pathは、重複を除くと85種類のdebである。同じfileを再取得する必要はないが、2集合（`downloads/sqlite-official-host` の 77 deb、`downloads/python-debian` の 13 deb）の相対保存先は維持する。
 
 ---
 
