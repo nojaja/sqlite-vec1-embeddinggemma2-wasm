@@ -9,17 +9,6 @@ import { VectorError, type ErrorCode } from "../errors";
 import { requestEmbedding } from "../workers/db";
 import type { EmbeddingCall } from "./functions";
 
-import { Worker, MessageChannel } from "node:worker_threads";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { createHash } from "node:crypto";
-import type { ReadyEmbeddingOptions } from "./options";
-import type { OfficialInferenceSession } from "./types";
-import { MODEL_ID, MODEL_REVISION, type ModelManifest } from "../runtime-assets/model-contract";
-import { VectorError, type ErrorCode } from "../errors";
-import { requestEmbedding } from "../workers/db";
-import type { EmbeddingCall } from "./functions";
-
 /**
  * 処理名: マニフェスト読み込みおよび検証
  * 処理概要: マニフェストファイルを読み込み、モデルID・リビジョン・ハッシュを検証する。

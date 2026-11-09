@@ -29,9 +29,6 @@ interface NodeVfsHandle {
  * @returns 初期化済みProductSqlite3インスタンス。
  */
 export default async function initialize(options: ProductInitOptions = {}): Promise<ProductSqlite3> {
-  if (options.embedding && isMainThread) {
-    throw new VectorError("E_ENVIRONMENT");
-  }
   let nodeVfs: NodeVfsHandle | undefined;
 
   /**

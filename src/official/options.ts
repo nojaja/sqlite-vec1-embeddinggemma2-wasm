@@ -124,9 +124,6 @@ function validateNodeEnvironment(environment: InitializationEnvironment, backend
  * @param backend 選択された推論バックエンド。
  */
 function validateEnvironment(environment: InitializationEnvironment, backend: Backend): void {
-  if (!environment.worker) {
-    throw new VectorError("E_ENVIRONMENT");
-  }
   if (environment.runtime === "node") {
     validateNodeEnvironment(environment, backend);
   } else if (environment.runtime === "browser") {
