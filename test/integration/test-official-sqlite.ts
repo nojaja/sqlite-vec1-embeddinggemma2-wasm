@@ -15,6 +15,7 @@ async function testOfficialSqlite(): Promise<void> {
   try {
     assert.equal(database.selectValue("SELECT sqlite_version()"), "3.54.1");
     assert.equal(database.selectValue("SELECT vec1_info()"), "version 0.7 (Scalar, single-threaded)");
+    assert.equal(database.selectValue("SELECT count(*) FROM pragma_module_list WHERE name='vec1'"), 1);
     assert.equal(database.selectValue("SELECT embedding(NULL)"), null);
     assert.equal(database.selectValue("SELECT embedding_query(NULL, 'embeddinggemma-2')"), null);
     assert.throws(() => database.selectValue("SELECT embedding(NULL, 'unknown')"), /E_INPUT/u);
@@ -25,6 +26,17 @@ async function testOfficialSqlite(): Promise<void> {
     database.exec("BEGIN; CREATE TABLE ordinary(value); INSERT INTO ordinary VALUES(1); COMMIT");
     assert.equal(database.selectValue("SELECT value FROM ordinary"), 1);
     database.exec("CREATE VIRTUAL TABLE vectors USING vec1(vector); INSERT INTO vectors(cmd,arg) VALUES('rebuild','{\"index\":\"flat\",\"distance\":\"cos\"}')");
+    const schemaSql = String(database.selectValue("SELECT sql FROM sqlite_schema WHERE name='vectors'"));
+    assert.match(schemaSql, /CREATE\s+VIRTUAL\s+TABLE\s+.*USING\s+vec1/i);
+    // TypeScript ラッパーを介さない低レベル CAPI 直接実行検証
+    const capiRc = sqlite3.capi.sqlite3_exec(
+      database,
+      "CREATE VIRTUAL TABLE _raw_native_vec USING vec1(v);",
+      0,
+      0,
+      0
+    );
+    assert.equal(capiRc, 0);
     const vector = new Uint8Array(3072); new DataView(vector.buffer).setFloat32(0, 1, true);
     database.exec({ sql: "INSERT INTO vectors(rowid,vector) VALUES(1,?)", bind: [vector] });
     assert.ok(Math.abs(Number(database.selectValue("SELECT DISTANCE(?,?)", [vector, vector]))) < 1e-6);

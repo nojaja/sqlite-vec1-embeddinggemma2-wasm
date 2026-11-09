@@ -6,10 +6,6 @@ import { finished } from "node:stream/promises";
 
 const DOWNLOAD_ITEMS = [
   {
-    target: "downloads/sqlite-wasm-3.54.1-build1.tgz",
-    url: "https://registry.npmjs.org/@sqlite.org/sqlite-wasm/-/sqlite-wasm-3.54.1-build1.tgz"
-  },
-  {
     target: "downloads/sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz",
     url: "https://codeload.github.com/sqlite/sqlite-wasm/tar.gz/ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a"
   }
