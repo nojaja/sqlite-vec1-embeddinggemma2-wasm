@@ -6,6 +6,11 @@ import initialize from "../../src/official/node";
 import { populateOfficialSample, searchOfficialSample, mutateOfficialSample } from "../official-scenario";
 import { MODEL_ASSET_FILES } from "../../src/runtime-assets/model-contract";
 
+/**
+ * 処理名: CLI引数構造定義
+ * 処理概要: サンプル実行に必要なコマンドライン引数の型を定義する。
+ * 実装理由: CLIオプションを型安全に受け渡しするため。
+ */
 interface CliArgs {
   modelRoot: string;
   workdir: string;
@@ -13,6 +18,12 @@ interface CliArgs {
   backend: "wasm" | "directml";
 }
 
+/**
+ * 処理名: CLI引数パース
+ * 処理概要: コマンドライン引数を走査し、CliArgsオブジェクトを構築する。
+ * 実装理由: 実行時オプションを構造化して取得するため。
+ * @returns パースされたCLI引数オブジェクト。
+ */
 function parseArgs(): CliArgs {
   const args = process.argv.slice(2);
   let modelRoot = "";
@@ -109,10 +120,23 @@ if (isMainThread) {
   const dbPath = join(workdir, "sample.sqlite3");
   const cacheDirectory = join(workdir, "model-cache");
 
+  /**
+   * 処理名: ネットワークモード切替
+   * 処理概要: 親スレッドにモード変更を通知し、切替完了を待機する。
+   * 実装理由: オンライン/オフラインのシナリオ検証を同期的に制御するため。
+   * @param mode - 切り替えるネットワークモード。
+   * @returns 切替完了Promise。
+   */
   async function setMode(mode: "online" | "offline"): Promise<void> {
     return new Promise((done) => {
-      const onMsg = (msg: any) => {
-        if (msg.kind === "mode-set") {
+      /**
+       * 処理名: モード設定応答ハンドラ
+       * 処理概要: 親スレッドからのmode-set完了通知を受信してPromiseを解決する。
+       * 実装理由: 親スレッド側のモード切替完了を検出するため。
+       * @param msg - 親スレッドからのメッセージオブジェクト。
+       */
+      const onMsg = (msg: unknown) => {
+        if (typeof msg === "object" && msg !== null && "kind" in msg && (msg as { kind: unknown }).kind === "mode-set") {
           parentPort?.off("message", onMsg);
           done();
         }
@@ -122,7 +146,13 @@ if (isMainThread) {
     });
   }
 
-  async function runScenario() {
+  /**
+   * 処理名: サンプルシナリオ実行
+   * 処理概要: オンライン初期化、オフライン初期化、データ登録・検索・更新シナリオを順次実行する。
+   * 実装理由: Node環境での公式シナリオの透過実行を検証するため。
+   * @returns 実行完了Promise。
+   */
+  async function runScenario(): Promise<void> {
     await setMode("online");
 
     // 1. Initial run: online

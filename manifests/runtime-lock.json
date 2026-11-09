@@ -82,6 +82,10 @@
     "patches/transformers-directml.patch": {
       "bytes": 338,
       "sha256": "5501275cb801894e61763e8fba14b38ee40acace0b5400d7eacacfc0dd92240f"
+    },
+    "patches/sqlite-official.patch": {
+      "bytes": 1432,
+      "sha256": "8666b85c8f3c024453048ea89e9e81564ff3579f2a00f8b845cb869cf8af304f"
     }
   },
   "toolchain": {

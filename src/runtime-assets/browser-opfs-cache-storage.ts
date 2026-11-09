@@ -1,23 +1,160 @@
-﻿import { VectorError } from "../errors";
+import { VectorError } from "../errors";
 import { positiveOption, splitLogicalPath } from "./cache-path";
 import type { ArtifactWriter, PersistentCacheStorage } from "./persistent-model-cache";
 
-/** OPFS file snapshot。 */
-export interface OpfsFileSnapshot { readonly size: number; arrayBuffer(): Promise<ArrayBuffer>; stream(): ReadableStream<Uint8Array> }
-/** OPFS writable。 */
-export interface OpfsWritable { write(data: Uint8Array<ArrayBuffer>): Promise<void>; close(): Promise<void>; abort(): Promise<void> }
-/** OPFS file handle。 */
-export interface OpfsFileHandle { getFile(): Promise<OpfsFileSnapshot>; createWritable(): Promise<OpfsWritable> }
-/** OPFS directory handle。 */
-export interface OpfsDirectoryHandle {
-  getDirectoryHandle(name: string, options?: { create?: boolean }): Promise<OpfsDirectoryHandle>;
-  getFileHandle(name: string, options?: { create?: boolean }): Promise<OpfsFileHandle>;
-  removeEntry(name: string, options?: { recursive?: boolean }): Promise<void>;
+/**
+ * 処理名: OPFSファイルスナップショットインターフェース
+ * 処理概要: OPFS上の読み取りファイルスナップショットを表現する。
+ * 実装理由: サイズ取得およびストリーム読み取りを可能にするため。
+ */
+export interface OpfsFileSnapshot {
+  readonly size: number;
+  /**
+   * 処理名: ArrayBuffer取得
+   * 処理概要: ファイル内容をArrayBufferとして取得する。
+   * 実装理由: バイト列を一括取得するため。
+   * @returns ファイル内容のArrayBufferプロミス。
+   */
+  arrayBuffer(): Promise<ArrayBuffer>;
+  /**
+   * 処理名: ReadableStream取得
+   * 処理概要: ファイル内容のReadableStreamを取得する。
+   * 実装理由: チャンク単位のストリーム読み込みを行うため。
+   * @returns 読み取りストリーム。
+   */
+  stream(): ReadableStream<Uint8Array>;
 }
-/** Web Locks境界。 */
-export interface BrowserLockManager { request<Result>(name: string, action: () => Promise<Result>): Promise<Result> }
-/** browser保存adapterのoption。 */
-export interface BrowserOpfsOptions { maxWriteBytes?: number }
+
+/**
+ * 処理名: OPFS書き込みインターフェース
+ * 処理概要: OPFSへのチャンク書き込みと確定・中断を提供する。
+ * 実装理由: アトミックかつ安全なファイル書き込みを実現するため。
+ */
+export interface OpfsWritable {
+  /**
+   * 処理名: データ書き込み
+   * 処理概要: バイト配列を書き込む。
+   * 実装理由: チャンクデータを順次書き出すため。
+   * @param data 書き込み対象バイト配列。
+   * @returns 完了プロミス。
+   */
+  write(data: Uint8Array<ArrayBuffer>): Promise<void>;
+  /**
+   * 処理名: 書き込み確定
+   * 処理概要: ファイル書き込みを確定して閉じる。
+   * 実装理由: ファイル内容をアトミックに確定するため。
+   * @returns 完了プロミス。
+   */
+  close(): Promise<void>;
+  /**
+   * 処理名: 書き込み中断
+   * 処理概要: 書き込み処理を中断して破棄する。
+   * 実装理由: エラー時に中途半端なファイルを残さないため。
+   * @returns 完了プロミス。
+   */
+  abort(): Promise<void>;
+}
+
+/**
+ * 処理名: OPFSファイルハンドルインターフェース
+ * 処理概要: OPFSファイルのエントリ操作を提供する。
+ * 実装理由: スナップショット取得および書き込みストリーム取得を抽象化するため。
+ */
+export interface OpfsFileHandle {
+  /**
+   * 処理名: ファイルスナップショット取得
+   * 処理概要: 現在のファイルスナップショットを取得する。
+   * 実装理由: 読み取り処理を行うため。
+   * @returns ファイルスナップショットのプロミス。
+   */
+  getFile(): Promise<OpfsFileSnapshot>;
+  /**
+   * 処理名: 書き込みストリーム生成
+   * 処理概要: ファイル書き込みストリームを生成する。
+   * 実装理由: ファイル書き出しを行うため。
+   * @returns 書き込みストリームのプロミス。
+   */
+  createWritable(): Promise<OpfsWritable>;
+}
+
+/**
+ * 処理名: OPFSエントリ取得オプションインターフェース
+ * 処理概要: ディレクトリやファイルハンドル取得時の作成指定を保持する。
+ * 実装理由: 存在しない場合の作成有無を制御するため。
+ */
+export interface OpfsGetEntryOptions {
+  create?: boolean;
+}
+
+/**
+ * 処理名: OPFSエントリ削除オプションインターフェース
+ * 処理概要: エントリ削除時の再帰指定を保持する。
+ * 実装理由: 再帰的ディレクトリ削除を制御するため。
+ */
+export interface OpfsRemoveEntryOptions {
+  recursive?: boolean;
+}
+
+/**
+ * 処理名: OPFSディレクトリハンドルインターフェース
+ * 処理概要: OPFSディレクトリ走査・エントリ取得・削除を提供する。
+ * 実装理由: ディレクトリ階層の走査とエントリ管理を抽象化するため。
+ */
+export interface OpfsDirectoryHandle {
+  /**
+   * 処理名: サブディレクトリハンドル取得
+   * 処理概要: 指定名のサブディレクトリハンドルを取得する。
+   * 実装理由: 階層的なディレクトリパスを解決するため。
+   * @param name ディレクトリ名。
+   * @param options 取得オプション。
+   * @returns ディレクトリハンドルのプロミス。
+   */
+  getDirectoryHandle(name: string, options?: OpfsGetEntryOptions): Promise<OpfsDirectoryHandle>;
+  /**
+   * 処理名: ファイルハンドル取得
+   * 処理概要: 指定名のファイルハンドルを取得する。
+   * 実装理由: ファイルへのアクセスを可能にするため。
+   * @param name ファイル名。
+   * @param options 取得オプション。
+   * @returns ファイルハンドルのプロミス。
+   */
+  getFileHandle(name: string, options?: OpfsGetEntryOptions): Promise<OpfsFileHandle>;
+  /**
+   * 処理名: エントリ削除
+   * 処理概要: 指定名のエントリを削除する。
+   * 実装理由: キャッシュファイルやディレクトリのクリーンアップを行うため。
+   * @param name エントリ名。
+   * @param options 削除オプション。
+   * @returns 完了プロミス。
+   */
+  removeEntry(name: string, options?: OpfsRemoveEntryOptions): Promise<void>;
+}
+
+/**
+ * 処理名: ブラウザロックマネージャーインターフェース
+ * 処理概要: Web Locks APIの排他実行制御を提供する。
+ * 実装理由: 複数タブ間でのキャッシュ操作競合を防止するため。
+ */
+export interface BrowserLockManager {
+  /**
+   * 処理名: 排他ロック要求
+   * 処理概要: 指定名のロックを取得してアクションを実行する。
+   * 実装理由: 排他的に非同期処理を実行するため。
+   * @param name ロック名。
+   * @param action 実行アクション関数。
+   * @returns アクションの実行結果プロミス。
+   */
+  request<Result>(name: string, action: () => Promise<Result>): Promise<Result>;
+}
+
+/**
+ * 処理名: ブラウザOPFSオプションインターフェース
+ * 処理概要: OPFS永続キャッシュストレージの設定オプションを定義する。
+ * 実装理由: 最大書き込みバイト数等のパラメータを柔軟に設定するため。
+ */
+export interface BrowserOpfsOptions {
+  maxWriteBytes?: number;
+}
 
 /**
  * 処理名: NotFound判定
@@ -40,7 +177,11 @@ async function sha256Hex(bytes: ArrayBuffer): Promise<string> {
   return Array.from(digest, (value) => value.toString(16).padStart(2, "0")).join("");
 }
 
-/** OPFS writer。 */
+/**
+ * 処理名: OPFSアーティファクトライター
+ * 処理概要: チャンク単位の書き込みとアトミック確定を制御するライタークラス。
+ * 実装理由: 一定サイズごとの書き出しと書き込み整合性を保証するため。
+ */
 class OpfsArtifactWriter implements ArtifactWriter {
   private closed = false;
 

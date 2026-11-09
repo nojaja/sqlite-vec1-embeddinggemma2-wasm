@@ -1,9 +1,22 @@
-﻿import { errorIdForCode, FATAL_ERROR_IDS } from "../bridge/error-ids";
+import { errorIdForCode, FATAL_ERROR_IDS } from "../bridge/error-ids";
 import { publishResponse } from "../bridge/protocol";
 import type { EmbedRequest } from "../inference/engine";
 
-/** handlerが必要とするengine境界。 */
-export interface InferenceHandlerEngine { embed(request: EmbedRequest): Promise<Uint8Array | null> }
+/**
+ * 処理名: 推論ハンドラエンジンインターフェース
+ * 処理概要: ワーカーメッセージハンドラが要求する推論エンジンの抽象境界を定義する。
+ * 実装理由: 推論実行処理を抽象化しテストやモックを容易にするため。
+ */
+export interface InferenceHandlerEngine {
+  /**
+   * 処理名: 埋め込み実行
+   * 処理概要: 埋め込みリクエストを処理してベクトルバイナリを返す。
+   * 実装理由: 要求されたテキストまたは画像の埋め込みベクトルを生成するため。
+   * @param request - 埋め込み推論リクエスト。
+   * @returns 埋め込みバイナリまたはnull。
+   */
+  embed(request: EmbedRequest): Promise<Uint8Array | null>;
+}
 
 /**
  * 処理名: 応答bufferの取得

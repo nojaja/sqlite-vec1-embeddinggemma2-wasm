@@ -3,6 +3,12 @@ import { Worker, isMainThread, parentPort, workerData } from "node:worker_thread
 import { startLocalModelServer } from "../test/integration/local-model-server";
 import type { ProductInitOptions, ProductSqlite3 } from "../src/official/types";
 
+/**
+ * 処理名: ログメッセージ出力
+ * 処理概要: メインスレッドではコンソールへ、ワーカースレッドでは親ポートへメッセージを転送する。
+ * 実装理由: 実行スレッド環境に応じた適切なログ出力を統一するため。
+ * @param msg - 出力するログメッセージ。
+ */
 function log(msg: string): void {
   if (isMainThread) {
     console.log(msg);
@@ -11,6 +17,12 @@ function log(msg: string): void {
   }
 }
 
+/**
+ * 処理名: CLIワーカータスク実行
+ * 処理概要: SQLiteおよびモデル推論を初期化し、ベクトル埋め込みと類似度検索シナリオを実行する。
+ * 実装理由: CLI環境でのベクトル型契約の透過動作を検証するため。
+ * @param baseUrl - モデル配信サーバーのベースURL。
+ */
 async function runCliWorker(baseUrl: string): Promise<void> {
   const initModule = require(resolve("dist/node/index.js")) as { default: (options?: ProductInitOptions) => Promise<ProductSqlite3> };
 
@@ -120,6 +132,11 @@ ORDER BY DISTANCE(embedding,embedding_query(:query)),id LIMIT 3;
   }
 }
 
+/**
+ * 処理名: CLIデモメイン処理
+ * 処理概要: ローカルモデルサーバーを起動し、ワーカーを生成してデモシナリオを完了まで監視する。
+ * 実装理由: CLIアプリケーションのエントリポイントを提供するため。
+ */
 async function main(): Promise<void> {
   const server = await startLocalModelServer();
   const worker = new Worker(__filename, {

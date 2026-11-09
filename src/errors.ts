@@ -1,4 +1,8 @@
-﻿/** 製品が公開する固定エラーcode。 */
+/**
+ * 処理名: 固定エラーコード型定義
+ * 処理概要: 製品が送出する固定エラーコードの列挙型を定義する。
+ * 実装理由: 外部例外本文を利用者へ漏らさず型安全にハンドリングするため。
+ */
 export type ErrorCode =
   | "E_INPUT" | "E_TOKEN_LIMIT" | "E_IMAGE_FORMAT" | "E_IMAGE_LIMIT" | "E_EMBEDDING_NOT_READY"
   | "E_EMBEDDING_VALUE" | "E_INFERENCE" | "E_MEMORY" | "E_PROTOCOL" | "E_TIMEOUT" | "E_CANCELLED"

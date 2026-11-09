@@ -13,9 +13,9 @@ export type Backend = "wasm" | "webgpu" | "directml";
  * 実装理由: オンライン/オフライン動作を制御するため。
  */
 export interface ModelOptions {
-  /** ネットワーク利用ポリシー ("allow" または "offline") */
+  // ネットワーク利用ポリシー ("allow" または "offline")
   network: "allow" | "offline";
-  /** ベースURL */
+  // ベースURL
   baseUrl?: string | undefined;
 }
 
@@ -25,15 +25,15 @@ export interface ModelOptions {
  * 実装理由: ユーザーが推論動作をカスタマイズできるようにするため。
  */
 export interface EmbeddingOptions {
-  /** バックエンド種別 */
+  // バックエンド種別
   backend?: Backend | undefined;
-  /** モデル取得設定 */
+  // モデル取得設定
   model: ModelOptions;
-  /** キャッシュディレクトリ */
+  // キャッシュディレクトリ
   cacheDirectory?: string | undefined;
-  /** 初期化タイムアウトミリ秒 */
+  // 初期化タイムアウトミリ秒
   initTimeoutMs?: number | undefined;
-  /** SQLタイムアウトミリ秒 */
+  // SQLタイムアウトミリ秒
   sqlTimeoutMs?: number | undefined;
 }
 
@@ -43,15 +43,15 @@ export interface EmbeddingOptions {
  * 実装理由: 環境ポリシーの遵守と適切なバックエンド選択のため。
  */
 export interface InitializationEnvironment {
-  /** Workerスレッド内実行か否か */
+  // Workerスレッド内実行か否か
   worker: boolean;
-  /** ランタイム種別 */
+  // ランタイム種別
   runtime: "node" | "browser";
-  /** OSプラットフォーム */
+  // OSプラットフォーム
   platform: string;
-  /** CPUアーキテクチャ */
+  // CPUアーキテクチャ
   architecture: string;
-  /** Node.jsメジャーバージョン */
+  // Node.jsメジャーバージョン
   nodeMajor?: number | undefined;
 }
 
@@ -61,11 +61,11 @@ export interface InitializationEnvironment {
  * 実装理由: 内部処理で確定した設定値を利用するため。
  */
 export interface ReadyEmbeddingOptions extends EmbeddingOptions {
-  /** 確定バックエンド */
+  // 確定バックエンド
   backend: Backend;
-  /** 確定初期化タイムアウト */
+  // 確定初期化タイムアウト
   initTimeoutMs: number;
-  /** 確定SQLタイムアウト */
+  // 確定SQLタイムアウト
   sqlTimeoutMs: number;
 }
 
@@ -74,16 +74,82 @@ const DEFAULT_SQL_TIMEOUT_MS = 120000;
 const MIN_TIMEOUT_MS = 1;
 const MAX_TIMEOUT_MS = 1800000;
 
+/**
+ * 処理名: タイムアウト値検証
+ * 処理概要: タイムアウト指定値が有効な範囲内の有限数値であるか検証する。
+ * 実装理由: 不正なタイムアウト指定による誤動作を防止するため。
+ * @param val 指定されたタイムアウトミリ秒。
+ * @param defaultVal 未指定時のデフォルトミリ秒。
+ * @returns 検証済みミリ秒。
+ */
+function validateTimeout(val: number | undefined, defaultVal: number): number {
+  if (val === undefined || val === null) return defaultVal;
+  if (typeof val !== "number" || !Number.isFinite(val) || val < MIN_TIMEOUT_MS || val > MAX_TIMEOUT_MS) {
+    throw new VectorError("E_INPUT");
+  }
+  return val;
+}
+
+/**
+ * 処理名: Node実行環境検証
+ * 処理概要: Node.jsランタイムにおけるOS・アーキテクチャ・バージョン・バックエンド整合性を検証する。
+ * 実装理由: サポート外のNode環境での推論実行を防止するため。
+ * @param environment 実行環境メタデータ。
+ * @param backend 選択された推論バックエンド。
+ */
+function validateNodeEnvironment(environment: InitializationEnvironment, backend: Backend): void {
+  if (environment.platform !== "win32" && environment.platform !== "linux") {
+    throw new VectorError("E_ENVIRONMENT");
+  }
+  if (environment.architecture !== "x64") {
+    throw new VectorError("E_ENVIRONMENT");
+  }
+  const nodeMajor = environment.nodeMajor ?? 24;
+  if (nodeMajor !== 24) {
+    throw new VectorError("E_ENVIRONMENT");
+  }
+  if (backend === "webgpu") {
+    throw new VectorError("E_ENVIRONMENT");
+  }
+  if (backend === "directml" && environment.platform !== "win32") {
+    throw new VectorError("E_ENVIRONMENT");
+  }
+}
+
+/**
+ * 処理名: 実行環境整合性検証
+ * 処理概要: Workerスレッドおよびランタイムごとのバックエンド互換性を検証する。
+ * 実装理由: プラットフォーム非互換のバックエンド実行を防止するため。
+ * @param environment 実行環境メタデータ。
+ * @param backend 選択された推論バックエンド。
+ */
+function validateEnvironment(environment: InitializationEnvironment, backend: Backend): void {
+  if (!environment.worker) {
+    throw new VectorError("E_ENVIRONMENT");
+  }
+  if (environment.runtime === "node") {
+    validateNodeEnvironment(environment, backend);
+  } else if (environment.runtime === "browser") {
+    if (backend === "directml") {
+      throw new VectorError("E_ENVIRONMENT");
+    }
+  }
+}
+
+/**
+ * 処理名: 埋め込みオプション検証
+ * 処理概要: ユーザー提供の埋め込みオプションを検証し、確定設定オブジェクトを構築する。
+ * 実装理由: 推論実行前に設定の妥当性とデフォルト値を保証するため。
+ * @param options ユーザー指定の埋め込みオプション。
+ * @param environment 実行環境メタデータ。
+ * @returns 検証済み確定埋め込みオプション、または未指定時undefined。
+ */
 export function validateEmbeddingOptions(
   options: EmbeddingOptions | undefined,
   environment: InitializationEnvironment
 ): ReadyEmbeddingOptions | undefined {
   if (options === undefined) {
     return undefined;
-  }
-
-  if (!environment.worker) {
-    throw new VectorError("E_ENVIRONMENT");
   }
 
   if (typeof options !== "object" || options === null || typeof options.model !== "object" || options.model === null) {
@@ -99,37 +165,7 @@ export function validateEmbeddingOptions(
     throw new VectorError("E_INPUT");
   }
 
-  if (environment.runtime === "node") {
-    if (environment.platform !== "win32" && environment.platform !== "linux") {
-      throw new VectorError("E_ENVIRONMENT");
-    }
-    if (environment.architecture !== "x64") {
-      throw new VectorError("E_ENVIRONMENT");
-    }
-    const nodeMajor = environment.nodeMajor ?? 24;
-    if (nodeMajor !== 24) {
-      throw new VectorError("E_ENVIRONMENT");
-    }
-
-    if (backend === "webgpu") {
-      throw new VectorError("E_ENVIRONMENT");
-    }
-    if (backend === "directml" && environment.platform !== "win32") {
-      throw new VectorError("E_ENVIRONMENT");
-    }
-  } else if (environment.runtime === "browser") {
-    if (backend === "directml") {
-      throw new VectorError("E_ENVIRONMENT");
-    }
-  }
-
-  const validateTimeout = (val: number | undefined, defaultVal: number): number => {
-    if (val === undefined || val === null) return defaultVal;
-    if (typeof val !== "number" || !Number.isFinite(val) || val < MIN_TIMEOUT_MS || val > MAX_TIMEOUT_MS) {
-      throw new VectorError("E_INPUT");
-    }
-    return val;
-  };
+  validateEnvironment(environment, backend);
 
   const initTimeoutMs = validateTimeout(options.initTimeoutMs, DEFAULT_INIT_TIMEOUT_MS);
   const sqlTimeoutMs = validateTimeout(options.sqlTimeoutMs, DEFAULT_SQL_TIMEOUT_MS);

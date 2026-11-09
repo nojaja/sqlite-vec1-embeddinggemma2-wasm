@@ -1,13 +1,41 @@
-﻿import { VectorError } from "../errors";
+import { VectorError } from "../errors";
 import { decodeImageBytes, resizeRgba } from "./image-codecs";
 
-/** 画像headerの検証結果。 */
+/**
+ * 処理名: 画像ヘッダーインターフェース
+ * 処理概要: 画像の幅・高さおよびフォーマット種別(PNG/JPEG)を定義する。
+ * 実装理由: 画像デコード前のメタデータ検証結果を型安全に保持するため。
+ */
 export interface ImageHeader { width: number; height: number; type: "png" | "jpeg" }
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const MAX_SIDE = 16384;
 const MAX_PIXELS = 16000000;
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+/**
+ * 処理名: PNGチャンク走査検証
+ * 処理概要: 各チャンクの境界と種別を確認し、IENDチャンク到達を検証する。
+ * 実装理由: inspectPngのループ内複雑度を低減するため。
+ * @param view - バイト列のDataView。
+ * @param totalLength - バイト列全体の長さ。
+ */
+function scanPngChunks(view: DataView, totalLength: number): void {
+  let offset = 8;
+  while (offset < totalLength) {
+    if (offset + 12 > totalLength) throw new VectorError("E_IMAGE_FORMAT");
+    const length = view.getUint32(offset, false);
+    const type = view.getUint32(offset + 4, false);
+    const end = offset + 12 + length;
+    if (end > totalLength || type === 0x6163544c) throw new VectorError("E_IMAGE_FORMAT");
+    if (type === 0x49454e44) {
+      if (length !== 0 || end !== totalLength) throw new VectorError("E_IMAGE_FORMAT");
+      return;
+    }
+    offset = end;
+  }
+  throw new VectorError("E_IMAGE_FORMAT");
+}
 
 /**
  * 処理名: PNG構造検証
@@ -22,20 +50,35 @@ function inspectPng(bytes: Uint8Array): { width: number; height: number } {
   if (view.getUint32(8, false) !== 13 || view.getUint32(12, false) !== 0x49484452) throw new VectorError("E_IMAGE_FORMAT");
   const dimensions = { width: view.getUint32(16, false), height: view.getUint32(20, false) };
   assertDimensions(dimensions.width, dimensions.height);
-  let offset = 8;
-  while (offset < bytes.length) {
-    if (offset + 12 > bytes.length) throw new VectorError("E_IMAGE_FORMAT");
-    const length = view.getUint32(offset, false);
-    const type = view.getUint32(offset + 4, false);
-    const end = offset + 12 + length;
-    if (end > bytes.length || type === 0x6163544c) throw new VectorError("E_IMAGE_FORMAT");
-    if (type === 0x49454e44) {
-      if (length !== 0 || end !== bytes.length) throw new VectorError("E_IMAGE_FORMAT");
-      return dimensions;
-    }
-    offset = end;
-  }
-  throw new VectorError("E_IMAGE_FORMAT");
+  scanPngChunks(view, bytes.length);
+  return dimensions;
+}
+
+/**
+ * 処理名: SOFマーカー判定
+ * 処理概要: マーカーがSOFフレームマーカーであるか確認する。
+ * 実装理由: 複雑なマーカー条件式をカプセル化するため。
+ * @param marker - JPEGマーカーコード。
+ * @returns SOFマーカーかどうかの真偽値。
+ */
+function isSofMarker(marker: number): boolean {
+  return marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+}
+
+/**
+ * 処理名: JPEGフレーム寸法取得
+ * 処理概要: SOFマーカー領域から画像の高さと幅を読み出す。
+ * 実装理由: inspectJpegのフレーム抽出処理を分離するため。
+ * @param bytes - JPEGバイト配列。
+ * @param offset - マーカーオフセット。
+ * @returns 抽出された幅と高さ。
+ */
+function readJpegDimensions(bytes: Uint8Array, offset: number): { width: number; height: number } {
+  if (offset + 9 > bytes.length) throw new VectorError("E_IMAGE_FORMAT");
+  const height = ((bytes[offset + 5] as number) << 8) | (bytes[offset + 6] as number);
+  const width = ((bytes[offset + 7] as number) << 8) | (bytes[offset + 8] as number);
+  assertDimensions(width, height);
+  return { width, height };
 }
 
 /**
@@ -53,13 +96,8 @@ function inspectJpeg(bytes: Uint8Array): { width: number; height: number } {
     const marker = bytes[offset + 1] as number;
     if (marker === 0xff) { offset += 1; continue; }
     const length = ((bytes[offset + 2] as number) << 8) | (bytes[offset + 3] as number);
-    const isFrame = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
-    if (isFrame) {
-      if (offset + 9 > bytes.length) throw new VectorError("E_IMAGE_FORMAT");
-      const height = ((bytes[offset + 5] as number) << 8) | (bytes[offset + 6] as number);
-      const width = ((bytes[offset + 7] as number) << 8) | (bytes[offset + 8] as number);
-      assertDimensions(width, height);
-      return { width, height };
+    if (isSofMarker(marker)) {
+      return readJpegDimensions(bytes, offset);
     }
     if (length < 2) throw new VectorError("E_IMAGE_FORMAT");
     offset += 2 + length;
@@ -205,5 +243,9 @@ export async function decodeRawImage(bytes: Uint8Array, mime: string): Promise<R
   return new RawImage(decoded.data, decoded.width, decoded.height, 4).rgb();
 }
 
-/** 上流互換のload_image。 */
+/**
+ * 処理名: 上流互換画像読み込み関数
+ * 処理概要: Transformers.jsのload_imageと互換性のある画像読み込み関数を提供する。
+ * 実装理由: 上流パイプラインとの透過的な互換性を確保するため。
+ */
 export const load_image = RawImage.read;

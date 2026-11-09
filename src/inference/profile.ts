@@ -1,8 +1,17 @@
 import { VectorError } from "../errors";
 
-/** 埋め込み次元数。 */
+/**
+ * 処理名: 埋め込み次元数定数
+ * 処理概要: モデルが出力する埋め込みベクトルの次元数(768)を定義する。
+ * 実装理由: 埋め込み次元の一貫性を担保するため。
+ */
 export const EMBEDDING_DIMENSION = 768;
-/** 埋め込みBLOBのbyte数。 */
+
+/**
+ * 処理名: 埋め込みBLOBバイト長定数
+ * 処理概要: 768次元Float32のバイト長(3072バイト)を定義する。
+ * 実装理由: バイナリ長検証を厳密に行うため。
+ */
 export const EMBEDDING_BYTES = 3072;
 const MAX_TOKENS = 2048;
 const MAX_BODY_BYTES = 1024 * 1024;

@@ -1,6 +1,10 @@
-﻿import { VectorError } from "../../src/errors";
+import { VectorError } from "../../src/errors";
 
-/** モデルlicense証跡。 */
+/**
+ * 処理名: モデルlicense証跡定義
+ * 処理概要: モデルのライセンスおよび証跡メタデータの構造を定義する。
+ * 実装理由: 配布条件の根拠を固定metadataと本文hashへ結び付けるため。
+ */
 export interface ModelLicenseEvidence {
   id: string;
   metadataPath: string;

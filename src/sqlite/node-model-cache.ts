@@ -1,4 +1,4 @@
-﻿import { VectorError } from "../errors";
+import { VectorError } from "../errors";
 import { createNodePersistentCacheStorage } from "../runtime-assets/node-persistent-cache-storage";
 import { MODEL_REPOSITORY, MODEL_REVISION, type ModelAssetDigest } from "../runtime-assets/model-contract";
 import { PersistentModelCache } from "../runtime-assets/persistent-model-cache";
@@ -6,10 +6,18 @@ import { VerifiedModelCache } from "../runtime-assets/verified-cache";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-/** Node既定のmodel取得元(固定repository/revision)。 */
+/**
+ * 処理名: Node既定モデルベースURL定数
+ * 処理概要: Node環境における既定のHugging Faceモデル取得元URLを定義する。
+ * 実装理由: 固定リポジトリおよびリビジョンからのモデル取得を一意にするため。
+ */
 export const DEFAULT_NODE_MODEL_BASE_URL = `https://huggingface.co/${MODEL_REPOSITORY}/resolve/${MODEL_REVISION}/`;
 
-/** Node model cache準備option。 */
+/**
+ * 処理名: Nodeモデルキャッシュオプションインターフェース
+ * 処理概要: Node環境でのモデルキャッシュ準備に必要なディレクトリやネットワーク設定を定義する。
+ * 実装理由: キャッシュ初期化設定を型安全に受け渡すため。
+ */
 export interface NodeModelCacheOptions {
   cacheDirectory?: string;
   network: "allow" | "offline";

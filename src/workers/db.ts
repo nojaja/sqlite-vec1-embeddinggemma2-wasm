@@ -1,11 +1,27 @@
-﻿import { readResponse, waitResponse, createResponseBuffer } from "../bridge/protocol";
+import { readResponse, waitResponse, createResponseBuffer } from "../bridge/protocol";
 import { ERROR_CODES_BY_ID } from "../bridge/error-ids";
 import { VectorError } from "../errors";
 
-/** 推論Workerへ送るport。 */
-export interface InferenceRequestPort { postMessage(message: unknown): void }
+/**
+ * 処理名: 推論要求ポートインターフェース
+ * 処理概要: 推論ワーカーへメッセージを送信するポートの抽象型を定義する。
+ * 実装理由: 異なるスレッド環境でのポート実装を共通化するため。
+ */
+export interface InferenceRequestPort {
+  /**
+   * 処理名: メッセージ送信
+   * 処理概要: 推論ワーカーへメッセージオブジェクトを送信する。
+   * 実装理由: 推論リクエストを非同期送信するため。
+   * @param message - 送信するメッセージオブジェクト。
+   */
+  postMessage(message: unknown): void;
+}
 
-/** DB ownerからの推論要求。 */
+/**
+ * 処理名: データベース埋め込みリクエスト型定義
+ * 処理概要: DBオーナーから推論ワーカーへ送出されるリクエストの構造を定義する。
+ * 実装理由: ジョブID、シーケンス番号、操作ペイロードを型安全に保持するため。
+ */
 export type DbEmbeddingRequest = { jobId: string; requestId: number; generation: number } & (
   | { operation: "query" | "document"; body: unknown; title?: unknown }
   | { operation: "image"; bytes: unknown; mime: unknown }

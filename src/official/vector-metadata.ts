@@ -1,11 +1,14 @@
 /**
  * 処理名: VECTOR 型メタデータおよびモデル自動解決モジュール
- * 処理概要:
- * 1. CREATE TABLE 文から VECTOR(dim, 'model') のカラム定義メタデータを抽出する (方式A)
- * 2. 実行時 SQL ステートメントおよびアクティブモデル一覧から [model] を自動解決する
- * 3. 動的モデルプロファイル型を定義する
+ * 処理概要: CREATE TABLE 文から VECTOR(dim, 'model') のカラム定義メタデータを抽出し、SQL 文やコンテキストからモデルを自動解決する。
+ * 実装理由: SQL レベルでの透過的なベクトル型サポートおよび推論モデルの紐付けを実現するため。
  */
 
+/**
+ * 処理名: ベクトルカラムメタデータ型
+ * 処理概要: テーブルのカラムに定義されたベクトル型の次元数およびモデル名を保持する。
+ * 実装理由: DDL から抽出されたベクトル定義を管理するため。
+ */
 export interface VectorColumnMetadata {
   tableName: string;
   columnName: string;
@@ -13,6 +16,11 @@ export interface VectorColumnMetadata {
   modelName?: string | undefined;
 }
 
+/**
+ * 処理名: モデルプロファイル定義型
+ * 処理概要: 推論モデルの名称、パス、次元数、正規化、プレフィックス定義を保持する。
+ * 実装理由: 動的モデル設定を型安全に管理するため。
+ */
 export interface ModelProfileDefinition {
   name: string;
   path: string;
@@ -24,6 +32,11 @@ export interface ModelProfileDefinition {
   } | undefined;
 }
 
+/**
+ * 処理名: モデル解決コンテキスト型
+ * 処理概要: ステートメント実行時の明示的指定モデル、アクティブモデル一覧、デフォルトモデルを保持する。
+ * 実装理由: ステートメント単位のモデル自動解決にコンテキスト情報を提供するため。
+ */
 export interface ModelResolutionContext {
   explicitModel?: string | undefined;
   activeModels?: string[] | undefined;
@@ -33,6 +46,10 @@ export interface ModelResolutionContext {
 /**
  * 処理名: VECTOR カラム定義解析
  * 処理概要: DDL 文字列から VECTOR(dimension, 'model') 構文を抽出する。
+ * 実装理由: テーブル作成 DDL からベクトルカラムのメタデータを自動抽出するため。
+ * @param tableName テーブル名。
+ * @param ddl DDL文字列。
+ * @returns カラム名をキーとするメタデータ辞書。
  */
 export function parseVectorColumnDefinitions(
   tableName: string,
@@ -62,8 +79,11 @@ export function parseVectorColumnDefinitions(
 
 /**
  * 処理名: VECTOR DDL SQL 変換
- * 処理概要: CREATE TABLE 内の VECTOR(dim, 'model') 構文を検出し、
- * メタデータを保持した上で SQLite がネイティブに解釈可能な BLOB 型に透過置換する。
+ * 処理概要: CREATE TABLE 内の VECTOR(dim, 'model') 構文を検出し、メタデータを保持した上で SQLite が解釈可能な BLOB 型に透過置換する。
+ * 実装理由: SQLite ネイティブ構文との互換性を保ちつつベクトル定義を有効化するため。
+ * @param sql 実行対象のSQL文字列。
+ * @param tableMetadata テーブルごとのメタデータ辞書。
+ * @returns 変換後のSQL文字列。
  */
 export function interceptAndTransformSql(
   sql: string,
@@ -101,13 +121,62 @@ export function interceptAndTransformSql(
 }
 
 /**
+ * 処理名: INSERT文からのモデル名解決
+ * 処理概要: INSERT INTO文のカラム定義とテーブルメタデータを照合してモデル名を解決する。
+ * 実装理由: 挿入先カラムのVECTOR定義から適切なモデルを決定するため。
+ * @param sql SQL文字列。
+ * @param tableMetadata テーブルメタデータ辞書。
+ * @returns 解決されたモデル名、または未検出時undefined。
+ */
+function resolveModelFromInsert(
+  sql: string,
+  tableMetadata: Record<string, Record<string, VectorColumnMetadata>>
+): string | undefined {
+  const insertMatch = /INSERT\s+INTO\s+([a-zA-Z0-9_]+)\s*\(([^)]+)\)\s*VALUES/i.exec(sql);
+  if (!insertMatch) return undefined;
+  const table = insertMatch[1]!;
+  const columns = insertMatch[2]!.split(",").map((c) => c.trim().toLowerCase());
+  const tableMeta = tableMetadata[table];
+  if (!tableMeta) return undefined;
+
+  for (const col of columns) {
+    const meta = tableMeta[col];
+    if (meta && meta.modelName) {
+      return meta.modelName;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 処理名: メタデータ内先頭モデル探索
+ * 処理概要: 登録されている全テーブルメタデータから最初に見つかるモデル名を探索する。
+ * 実装理由: モデル指定がない場合のフォールバックとして採用するため。
+ * @param tableMetadata テーブルメタデータ辞書。
+ * @returns 見つかったモデル名、または未検出時undefined。
+ */
+function findFirstModelInMetadata(
+  tableMetadata: Record<string, Record<string, VectorColumnMetadata>>
+): string | undefined {
+  for (const table in tableMetadata) {
+    const cols = tableMetadata[table]!;
+    for (const col in cols) {
+      if (cols[col]?.modelName) {
+        return cols[col]!.modelName;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
  * 処理名: ステートメント向けモデル解決
- * 処理概要:
- * 優先順位:
- * 1. 明示指定 (explicitModel)
- * 2. INSERT / UPDATE の代入先カラムの VECTOR 定義
- * 3. 単一アクティブモデル
- * 4. デフォルトモデル
+ * 処理概要: SQL文、テーブルメタデータ、コンテキスト情報から適切な埋め込みモデル名を自動解決する。
+ * 実装理由: 明示指定、DDL定義、単一アクティブモデル、デフォルトモデルの優先順位に従ってモデルを決定するため。
+ * @param sql 実行SQL文字列。
+ * @param tableMetadata テーブルメタデータ辞書。
+ * @param context モデル解決コンテキスト。
+ * @returns 解決されたモデル名、または未解決時undefined。
  */
 export function resolveModelForStatement(
   sql: string,
@@ -120,20 +189,9 @@ export function resolveModelForStatement(
   }
 
   // 2. INSERT INTO <table> (...) VALUES (...) のコンテキスト解析
-  const insertMatch = /INSERT\s+INTO\s+([a-zA-Z0-9_]+)\s*\(([^)]+)\)\s*VALUES/i.exec(sql);
-  if (insertMatch) {
-    const table = insertMatch[1]!;
-    const columns = insertMatch[2]!.split(",").map((c) => c.trim().toLowerCase());
-    const tableMeta = tableMetadata[table];
-
-    if (tableMeta) {
-      for (const col of columns) {
-        const meta = tableMeta[col];
-        if (meta && meta.modelName) {
-          return meta.modelName;
-        }
-      }
-    }
+  const insertModel = resolveModelFromInsert(sql, tableMetadata);
+  if (insertModel) {
+    return insertModel;
   }
 
   // 3. アクティブモデルが 1 種類のみの場合は自動採用
@@ -146,15 +204,6 @@ export function resolveModelForStatement(
     return context.defaultModel;
   }
 
-  // 全メタデータから最初に見つかったモデルをフォールバックとして採用
-  for (const table in tableMetadata) {
-    const cols = tableMetadata[table]!;
-    for (const col in cols) {
-      if (cols[col]?.modelName) {
-        return cols[col]!.modelName;
-      }
-    }
-  }
-
-  return undefined;
+  // 5. 全メタデータから最初に見つかったモデルをフォールバックとして採用
+  return findFirstModelInMetadata(tableMetadata);
 }

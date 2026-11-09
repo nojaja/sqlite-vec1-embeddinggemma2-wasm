@@ -1,5 +1,10 @@
-﻿import { VectorError } from "../../errors";
+import { VectorError } from "../../errors";
 
+/**
+ * 処理名: DirectMLネイティブ資材メタデータ
+ * 処理概要: DirectMLバイナリのパス、バイトサイズ、SHA-256ハッシュを定義する。
+ * 実装理由: ネイティブアセットの完全性検証を行うため。
+ */
 export interface DirectMlNativeAsset {
   path: string;
   bytes: number;
@@ -13,6 +18,13 @@ const REQUIRED_ASSETS: readonly DirectMlNativeAsset[] = Object.freeze([
   { path: "bin/napi-v6/win32/x64/onnxruntime_binding.node", bytes: 358200, sha256: "8d9f996ff7dcc60c4899aa87aa7abe07d806f9c314882f44a001d0fd8a23d16f" }
 ]);
 
+/**
+ * 処理名: DirectML資材インベントリ検証
+ * 処理概要: パッケージ内のDirectMLネイティブライブラリのバージョンとハッシュを照合する。
+ * 実装理由: 破損や改ざんのないDirectMLバイナリのみを実行可能にするため。
+ * @param version - ONNX Runtimeのバージョン文字列。
+ * @param actual - 検出された資材メタデータの配列。
+ */
 export function validateDirectMlInventory(version: string, actual: readonly DirectMlNativeAsset[]): void {
   if (version !== "1.31.1" || actual.length !== REQUIRED_ASSETS.length) {
     throw new VectorError("E_ASSET_INTEGRITY");

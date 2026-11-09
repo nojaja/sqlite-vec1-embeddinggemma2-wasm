@@ -2,17 +2,60 @@ import { initializeOfficialRuntime } from "./initialize";
 import type { ProductInitOptions, ProductSqlite3 } from "./types";
 import { MODEL_ID, MODEL_REVISION } from "../runtime-assets/model-contract";
 
-export async function sqlite3Worker1Promiser(...args: any[]): Promise<any> {
+/**
+ * 処理名: 公式Worker1プロミサー初期化
+ * 処理概要: sqlite3-worker1-promiser.mjsを動的インポートしプロミサー関数を生成する。
+ * 実装理由: Web Workerベースの非同期プロミサーAPIをブラウザで利用可能にするため。
+ * @param args - プロミサー生成引数。
+ * @returns プロミサー関数インスタンス。
+ */
+export async function sqlite3Worker1Promiser(...args: unknown[]): Promise<unknown> {
   const mod = await import("../../downloads/sqlite-official/sqlite3-worker1-promiser.mjs");
-  return (mod as any).default(...args);
+  const defaultFn = (mod as { default: (...a: unknown[]) => unknown }).default;
+  return defaultFn(...args);
 }
 
+/**
+ * 処理名: ブラウザ向けSQLite3ランタイム初期化
+ * 処理概要: ブラウザ環境向けに公式SQLite3ランタイムと埋め込み拡張を初期化する。
+ * 実装理由: ブラウザ上でベクトル検索付きSQLiteを利用可能にするため。
+ * @param options - 製品初期化オプション。
+ * @returns 初期化済みProductSqlite3インスタンス。
+ */
 export default async function initialize(options: ProductInitOptions = {}): Promise<ProductSqlite3> {
-  const isDedicatedWorker = typeof (globalThis as any).WorkerGlobalScope !== "undefined" && typeof (self as any).importScripts === "function";
-  const factory = async (opts?: any) => {
+  const globalObj = globalThis as unknown as Record<string, unknown>;
+  const selfObj = typeof self !== "undefined" ? (self as unknown as Record<string, unknown>) : {};
+  const isDedicatedWorker = typeof globalObj.WorkerGlobalScope !== "undefined" && typeof selfObj.importScripts === "function";
+
+  /**
+   * 処理名: ブラウザ公式SQLiteファクトリ呼び出し
+   * 処理概要: sqlite3-bundler-friendly.mjsを動的インポートしインスタンス化する。
+   * 実装理由: ブラウザ環境でのSQLite Wasmランタイムを生成するため。
+   * @param opts - 初期化オプションレコード。
+   * @returns SQLite3公式インスタンス。
+   */
+  async function factory(opts?: Record<string, unknown>): Promise<unknown> {
     const mod = await import("../../downloads/sqlite-official/sqlite3-bundler-friendly.mjs");
-    return (mod as any).default(opts);
-  };
+    const defaultFn = (mod as { default: (o?: unknown) => Promise<unknown> }).default;
+    return defaultFn(opts);
+  }
+
+  /**
+   * 処理名: スタブ推論実行
+   * 処理概要: 3072バイトのゼロ埋めベクトルを返す。
+   * 実装理由: 初期化時のスタブ推論関数を提供するため。
+   * @returns 3072バイトのゼロ配列。
+   */
+  const inferStub = (): Uint8Array => new Uint8Array(3072);
+
+  /**
+   * 処理名: スタブ推論セッション終了
+   * 処理概要: 何も行わず正常完了する。
+   * 実装理由: セッション終了インターフェースを満たすため。
+   * @returns 完了Promise。
+   */
+  const closeStub = async (): Promise<void> => {};
+
   return initializeOfficialRuntime(
     factory,
     options,
@@ -23,7 +66,7 @@ export default async function initialize(options: ProductInitOptions = {}): Prom
       architecture: "browser"
     },
     async (readyOptions) => ({
-      infer: () => new Uint8Array(3072),
+      infer: inferStub,
       identity: {
         modelId: MODEL_ID,
         revision: MODEL_REVISION,
@@ -33,7 +76,7 @@ export default async function initialize(options: ProductInitOptions = {}): Prom
         runtimeGeneration: 1
       },
       information: { ready: true },
-      close: async () => {}
+      close: closeStub
     })
   );
 }

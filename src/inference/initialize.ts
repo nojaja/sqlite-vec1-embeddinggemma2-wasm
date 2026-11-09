@@ -3,17 +3,50 @@ import { MODEL_REPOSITORY, MODEL_REVISION } from "../runtime-assets/model-contra
 import type { ImageCodecBytes } from "./image-codecs";
 import { InferenceEngine, type PortableRuntime } from "./engine";
 
-/** 共通初期化入力。 */
+/**
+ * 処理名: 共通推論初期化入力インターフェース
+ * 処理概要: キャッシュ、画像コーデック、ウォームアップ画像を含む共通初期化データを定義する。
+ * 実装理由: 各種バックエンドの初期化パラメータの基底型とするため。
+ */
 interface CommonInitialization { cache: object; codecs: ImageCodecBytes; warmupImage: Uint8Array }
-/** wasm/webgpu用初期化入力。 */
+
+/**
+ * 処理名: ORT Web推論初期化入力インターフェース
+ * 処理概要: WasmまたはWebGPUバックエンド用のWasmおよびファクトリURLを定義する。
+ * 実装理由: Wasm/WebGPU固有の初期化設定を型安全に受け渡すため。
+ */
 export interface OrtWebInitialization extends CommonInitialization { backend: "wasm" | "webgpu"; wasmUrl: string; factoryUrl: string }
-/** DirectML用初期化入力。 */
+
+/**
+ * 処理名: DirectML推論初期化入力インターフェース
+ * 処理概要: DirectMLバックエンド用のグラフ最適化レベルなどの初期化設定を定義する。
+ * 実装理由: DirectML固有の実行構成を型安全に保持するため。
+ */
 export interface DirectMlInitialization extends CommonInitialization { backend: "directml"; graphOptimizationLevel?: "disabled" | "basic" | "extended" | "all" }
-/** 推論初期化入力。 */
+
+/**
+ * 処理名: 推論初期化入力型定義
+ * 処理概要: ORT Web版またはDirectML版の初期化設定の合併型を定義する。
+ * 実装理由: バックエンド種別に応じた判別可能な初期化設定を受け渡すため。
+ */
 export type InferenceInitialization = OrtWebInitialization | DirectMlInitialization;
 
-/** 共通warm-up用1px PNG(base64)。 */
+/**
+ * 処理名: ウォームアップ画像Base64定数
+ * 処理概要: 初期化時ウォームアップ用の1x1 PNG画像Base64文字列を定義する。
+ * 実装理由: デコードおよび画像埋め込みパイプラインの事前ウォームアップに使用するため。
+ */
 const WARMUP_PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==";
+
+/**
+ * 処理名: 外部通信遮断fetch関数
+ * 処理概要: ランタイムからの未許可な外部ネットワーク通信を検知して例外を送出する。
+ * 実装理由: キャッシュ外への通信を完全に遮断するため。
+ * @returns 常に例外を投げる。
+ */
+async function blockedFetch(): Promise<Response> {
+  throw new VectorError("E_ASSET_INTEGRITY");
+}
 
 /**
  * 処理名: warm-up画像取得
@@ -36,7 +69,7 @@ function configureRuntime(runtime: PortableRuntime, options: InferenceInitializa
   Object.assign(runtime.env, {
     useCustomCache: true, customCache: options.cache, useBrowserCache: false, useFSCache: false, useFS: false,
     allowLocalModels: true, allowRemoteModels: false, localModelPath: "/models/", useWasmCache: false,
-    fetch: async () => { throw new VectorError("E_ASSET_INTEGRITY"); }
+    fetch: blockedFetch
   });
   if (options.backend !== "directml") {
     if (!runtime.env.backends.onnx.wasm) {

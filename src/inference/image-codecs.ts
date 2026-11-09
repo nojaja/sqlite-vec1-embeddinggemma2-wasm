@@ -1,8 +1,17 @@
-﻿import { VectorError } from "../errors";
+import { VectorError } from "../errors";
 
-/** codecのWasm bytes。 */
+/**
+ * 処理名: 画像コーデックバイナリインターフェース
+ * 処理概要: JPEG/PNGデコーダおよびリサイズ用のWasmバイト配列を保持する。
+ * 実装理由: 画像処理用WebAssemblyモジュールを型安全に注入するため。
+ */
 export interface ImageCodecBytes { jpeg: Uint8Array; png: Uint8Array; resize: Uint8Array }
-/** Node/browser共通のImageData互換。 */
+
+/**
+ * 処理名: 共通画像データインターフェース
+ * 処理概要: ImageData互換のピクセル配列および幅・高さを定義する。
+ * 実装理由: Nodeとブラウザ環境で共通の画像ピクセル構造を扱うため。
+ */
 export interface PortableImageData { data: Uint8ClampedArray; width: number; height: number }
 
 let ready = false;

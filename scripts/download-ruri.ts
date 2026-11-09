@@ -14,6 +14,12 @@ const FILES_TO_DOWNLOAD = [
   "onnx/model_q4.onnx"
 ];
 
+/**
+ * 処理名: 単一ファイルダウンロード
+ * 処理概要: Hugging Faceから指定された相対パスのモデル資材を取得し保存する。
+ * 実装理由: 必要なモデル関連ファイルを段階的に取得するため。
+ * @param relPath - ダウンロード対象の相対パス。
+ */
 async function downloadFile(relPath: string): Promise<void> {
   const targetPath = resolve(TARGET_DIR, relPath);
   if (existsSync(targetPath)) {
@@ -35,6 +41,11 @@ async function downloadFile(relPath: string): Promise<void> {
   console.log(`[DONE] ${relPath} のダウンロードが完了しました。`);
 }
 
+/**
+ * 処理名: Ruriモデル資材一括ダウンロード
+ * 処理概要: Ruriモデル実行に必要な一連のファイルを順次ダウンロードする。
+ * 実装理由: 埋め込み推論に必要なモデル資材一式をローカルに揃えるため。
+ */
 async function main(): Promise<void> {
   console.log("=== Ruri-v3 (130m ONNX Q4) モデルダウンロード開始 ===");
   mkdirSync(TARGET_DIR, { recursive: true });

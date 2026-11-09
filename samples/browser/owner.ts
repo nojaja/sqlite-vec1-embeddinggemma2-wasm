@@ -22,9 +22,29 @@ export async function runOwnedBrowser(network: "allow" | "offline" = "allow"): P
   await sqlite3.embedding.close();
 }
 
+/**
+ * 処理名: オンラインウォークスルー実行
+ * 処理概要: オンライン許可モードでブラウザ所有Worker処理を実行する。
+ * 実装理由: グローバル公開関数として外部実行を可能にするため。
+ * @returns 実行完了Promise。
+ */
+function runOnline(): Promise<void> {
+  return runOwnedBrowser("allow");
+}
+
+/**
+ * 処理名: オフラインウォークスルー実行
+ * 処理概要: オフラインモードでブラウザ所有Worker処理を実行する。
+ * 実装理由: グローバル公開関数として外部実行を可能にするため。
+ * @returns 実行完了Promise。
+ */
+function runOffline(): Promise<void> {
+  return runOwnedBrowser("offline");
+}
+
 if (typeof (globalThis as unknown as { __SVW_WALKTHROUGH_ONLINE__?: unknown }).__SVW_WALKTHROUGH_ONLINE__ === "undefined") {
-  (globalThis as unknown as { __SVW_WALKTHROUGH_ONLINE__: unknown }).__SVW_WALKTHROUGH_ONLINE__ = () => runOwnedBrowser("allow");
+  (globalThis as unknown as { __SVW_WALKTHROUGH_ONLINE__: unknown }).__SVW_WALKTHROUGH_ONLINE__ = runOnline;
 }
 if (typeof (globalThis as unknown as { __SVW_WALKTHROUGH_OFFLINE__?: unknown }).__SVW_WALKTHROUGH_OFFLINE__ === "undefined") {
-  (globalThis as unknown as { __SVW_WALKTHROUGH_OFFLINE__: unknown }).__SVW_WALKTHROUGH_OFFLINE__ = () => runOwnedBrowser("offline");
+  (globalThis as unknown as { __SVW_WALKTHROUGH_OFFLINE__: unknown }).__SVW_WALKTHROUGH_OFFLINE__ = runOffline;
 }

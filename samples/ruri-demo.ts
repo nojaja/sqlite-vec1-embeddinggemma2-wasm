@@ -26,6 +26,59 @@ if (!isMainThread) {
 
   const onnxPath = resolve(modelDir, "onnx/model_q4.onnx");
 
+  /**
+   * 処理名: Ruri推論リクエスト処理
+   * 処理概要: 共有メモリからテキストを取得し、トークナイズ・ONNX推論・L2正規化を実行して結果を格納する。
+   * 実装理由: 推論ワーカーのメインループ複雑度を低減するため。
+   * @param session - ONNX推論セッション。
+   * @param tokenizer - トークナイザーインスタンス。
+   * @param tokenizer.encode - テキストエンコード関数。
+   * @param control - 制御フラグ配列。
+   * @param dataView - データ送受信用バイト配列。
+   */
+  async function processRuriInference(
+    session: ort.InferenceSession,
+    tokenizer: { encode: (text: string) => { ids: number[] } },
+    control: Int32Array,
+    dataView: Uint8Array
+  ): Promise<void> {
+    const opCode = control[1]; // 0: document, 1: query
+    const textLen = control[2]!;
+    const textBytes = dataView.subarray(0, textLen);
+    const text = new TextDecoder().decode(textBytes);
+
+    // Ruri-v3 公式仕様のプレフィックス
+    const prefixedText = opCode === 1 ? `検索クエリ: ${text}` : `検索文書: ${text}`;
+    const encoding = tokenizer.encode(prefixedText);
+    const ids = BigInt64Array.from(encoding.ids.map((id: number) => BigInt(id)));
+    const mask = new BigInt64Array(ids.length).fill(1n);
+
+    const feeds = {
+      input_ids: new ort.Tensor("int64", ids, [1, ids.length]),
+      attention_mask: new ort.Tensor("int64", mask, [1, mask.length])
+    };
+
+    const res = await session.run(feeds);
+    const outputTensor = res.sentence_embedding || res.token_embeddings;
+    if (!outputTensor) throw new Error("No output tensor from Ruri session");
+    const rawData = outputTensor.data as Float32Array;
+
+    // 512 次元 L2 正規化
+    const normVec = new Float32Array(512);
+    let sumSq = 0;
+    for (let i = 0; i < 512; i++) sumSq += rawData[i]! * rawData[i]!;
+    const norm = Math.sqrt(sumSq) || 1.0;
+    for (let i = 0; i < 512; i++) normVec[i] = rawData[i]! / norm;
+
+    // 2048 バイトのバイナリを出力
+    const outBytes = new Uint8Array(normVec.buffer, normVec.byteOffset, normVec.byteLength);
+    dataView.set(outBytes, 0);
+
+    control[3] = outBytes.byteLength;
+    Atomics.store(control, 0, STATUS_DONE);
+    Atomics.notify(control, 0);
+  }
+
   ort.InferenceSession.create(onnxPath).then(async (session) => {
     parentPort?.postMessage({ status: "ready" });
 
@@ -34,47 +87,18 @@ if (!isMainThread) {
         Atomics.wait(control, 0, STATUS_IDLE, 50);
       }
 
-      const opCode = control[1]; // 0: document, 1: query
-      const textLen = control[2]!;
-      const textBytes = dataView.subarray(0, textLen);
-      const text = new TextDecoder().decode(textBytes);
-
-      // Ruri-v3 公式仕様のプレフィックス
-      const prefixedText = opCode === 1 ? `検索クエリ: ${text}` : `検索文書: ${text}`;
-      const encoding = tokenizer.encode(prefixedText);
-      const ids = BigInt64Array.from(encoding.ids.map((id: number) => BigInt(id)));
-      const mask = new BigInt64Array(ids.length).fill(1n);
-
-      const feeds = {
-        input_ids: new ort.Tensor("int64", ids, [1, ids.length]),
-        attention_mask: new ort.Tensor("int64", mask, [1, mask.length])
-      };
-
-      const res = await session.run(feeds);
-      const outputTensor = res.sentence_embedding || res.token_embeddings;
-      if (!outputTensor) throw new Error("No output tensor from Ruri session");
-      const rawData = outputTensor.data as Float32Array;
-
-      // 512 次元 L2 正規化
-      const normVec = new Float32Array(512);
-      let sumSq = 0;
-      for (let i = 0; i < 512; i++) sumSq += rawData[i]! * rawData[i]!;
-      const norm = Math.sqrt(sumSq) || 1.0;
-      for (let i = 0; i < 512; i++) normVec[i] = rawData[i]! / norm;
-
-      // 2048 バイトのバイナリを出力
-      const outBytes = new Uint8Array(normVec.buffer, normVec.byteOffset, normVec.byteLength);
-      dataView.set(outBytes, 0);
-
-      control[3] = outBytes.byteLength;
-      Atomics.store(control, 0, STATUS_DONE);
-      Atomics.notify(control, 0);
+      await processRuriInference(session, tokenizer, control, dataView);
     }
   });
 } else {
   // =========================================================================
   // Main Thread: SQLite Wasm & 指定クエリ実行
   // =========================================================================
+  /**
+   * 処理名: Ruriデモメイン処理
+   * 処理概要: Ruri推論ワーカーを立ち上げ、SQLite拡張登録とベクトル検索を実行する。
+   * 実装理由: 512次元モデルと可変VECTOR契約の透過動作を実証するため。
+   */
   async function main(): Promise<void> {
     console.log("================================================================================");
     console.log("  Ruri-v3 (512次元) ONNX モデル推論 & 契約クエリ検証 CLI アプリケーション");
@@ -93,6 +117,13 @@ if (!isMainThread) {
     });
     console.log("  -> Ruri-v3 推論ワーカー起動完了 (512次元 Float32)");
 
+    /**
+     * 処理名: Ruri同期推論実行
+     * 処理概要: 共有メモリを介して推論ワーカーに同期埋め込み要求を発行し、ベクトルバイナリを取得する。
+     * 実装理由: SQLite UDFコールバックから同期的に512次元埋め込みを取得するため。
+     * @param call - 埋め込み呼び出し情報。
+     * @returns 埋め込みベクトルバイナリ。
+     */
     function inferRuriSync(call: EmbeddingCall): Uint8Array {
       if (call.operation === "image") {
         throw new Error("Ruri does not support image embedding");
@@ -182,7 +213,7 @@ VALUES(1,:text,embedding(:text));
           });
           console.log(`  [登録完了] id: ${doc.id} | "${doc.text}"`);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Insert error:", err);
         throw err;
       }

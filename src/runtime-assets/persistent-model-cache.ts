@@ -1,23 +1,116 @@
 import { VectorError } from "../errors";
 import { validateModelAssets, type ModelAssetDigest } from "./model-contract";
 
-/** 成果物の書込み先。 */
-export interface ArtifactWriter { write(chunk: Uint8Array): Promise<void>; close(): Promise<void>; abort(): Promise<void> }
-/** 永続cacheの保存adapter。 */
+/**
+ * 処理名: 資材ライターインターフェース
+ * 処理概要: ストリーム書き込み、クローズ、アボートメソッドを定義する。
+ * 実装理由: キャッシュ保存時のアトミックな書き込みライフサイクルを抽象化するため。
+ */
+export interface ArtifactWriter {
+  /**
+   * 処理名: チャンク書き込み
+   * 処理概要: バイナリチャンクをストレージへ追記する。
+   * 実装理由: 分割ストリームデータを順次書き込むため。
+   * @param chunk - 書き込むバイト配列。
+   */
+  write(chunk: Uint8Array): Promise<void>;
+  /**
+   * 処理名: 書き込み完了クローズ
+   * 処理概要: 書き込みを完了しリソースをフラッシュして閉じる。
+   * 実装理由: 正常終了時のファイル確定を行うため。
+   */
+  close(): Promise<void>;
+  /**
+   * 処理名: 書き込み破棄アボート
+   * 処理概要: 書き込み途中のテンポラリリソースを破棄する。
+   * 実装理由: エラー発生時に不完全な一時ファイルを残さないため。
+   */
+  abort(): Promise<void>;
+}
+
+/**
+ * 処理名: 永続キャッシュストレージインターフェース
+ * 処理概要: ファイルの存在確認、読み出し、ダイジェスト取得、ライター生成、コミット、削除、排他制御を定義する。
+ * 実装理由: プラットフォームごとのファイルシステムやOPFSストレージ操作を抽象化するため。
+ */
 export interface PersistentCacheStorage {
+  /**
+   * 処理名: ファイル存在確認
+   * 処理概要: 指定パスに通常ファイルが存在するか確認する。
+   * 実装理由: 資材の配置状況を判定するため。
+   * @param path - 論理パス。
+   * @returns 存在真偽値。
+   */
   exists(path: string): Promise<boolean>;
+  /**
+   * 処理名: 資材バイナリ読み出し
+   * 処理概要: 指定パスのファイル内容を全件読み出す。
+   * 実装理由: キャッシュ済み資材をメモリへ読み込むため。
+   * @param path - 論理パス。
+   * @returns バイト配列またはundefined。
+   */
   read(path: string): Promise<Uint8Array | undefined>;
+  /**
+   * 処理名: 資材ダイジェスト取得
+   * 処理概要: 指定パスのバイトサイズとSHA-256ハッシュを計算して返す。
+   * 実装理由: 保存済み資材の破損や不整合を検出するため。
+   * @param path - 論理パス。
+   * @returns サイズとハッシュのオブジェクトまたはundefined。
+   */
   digest(path: string): Promise<{ bytes: number; sha256: string } | undefined>;
+  /**
+   * 処理名: 資材ライター生成
+   * 処理概要: 指定パスへの書き込みストリームライターを生成する。
+   * 実装理由: 新規資材のアトミックな保存を開始するため。
+   * @param path - 保存先論理パス。
+   * @returns ArtifactWriterインスタンス。
+   */
   createWriter(path: string): Promise<ArtifactWriter>;
+  /**
+   * 処理名: 一時資材アトミックコミット
+   * 処理概要: ステージング資材を本番配置先パスへ移動・確定する。
+   * 実装理由: 不完全な状態での公開を防ぎアトミックに反映するため。
+   * @param source - 移動元パス。
+   * @param target - 移動先パス。
+   */
   commit(source: string, target: string): Promise<void>;
+  /**
+   * 処理名: ディレクトリツリー削除
+   * 処理概要: 指定プレフィックス配下の全資材を再帰的に削除する。
+   * 実装理由: キャッシュセットの無効化や破棄を一括実行するため。
+   * @param prefix - 削除対象プレフィックス。
+   */
   removeTree(prefix: string): Promise<void>;
+  /**
+   * 処理名: 排他制御実行
+   * 処理概要: キーごとに排他ロックを取得して非同期処理を実行する。
+   * 実装理由: 複数ワーカーや並行処理間でのキャッシュ競合破損を防ぐため。
+   * @param key - ロック識別キー。
+   * @param action - 排他下で実行する非同期関数。
+   * @returns アクションの戻り値。
+   */
   runExclusive<T>(key: string, action: () => Promise<T>): Promise<T>;
 }
-/** cache初期化mode。 */
+
+/**
+ * 処理名: モデルキャッシュ初期化モード型定義
+ * 処理概要: キャッシュ初期化時のネットワーク動作モード(online/cold/offline)を定義する。
+ * 実装理由: ネットワーク接続制限ポリシーを厳格に適用するため。
+ */
 export type ModelCacheMode = "online" | "cold" | "offline";
-/** 資材取得関数。 */
+
+/**
+ * 処理名: 資材取得関数型定義
+ * 処理概要: モデル資材情報を受け取りリモートまたはローカルからHTTPレスポンスを取得する関数を定義する。
+ * 実装理由: ダウンロード処理の外部注入を可能にするため。
+ */
 export type AssetFetcher = (asset: ModelAssetDigest) => Promise<Response>;
-/** PersistentModelCacheのoption。 */
+
+/**
+ * 処理名: 永続モデルキャッシュオプションインターフェース
+ * 処理概要: 資材ダイジェスト配列、セットハッシュ、マニフェストハッシュ、ストレージアダプタ等を定義する。
+ * 実装理由: キャッシュ管理クラスの生成パラメータを型安全に受け渡すため。
+ */
 export interface PersistentModelCacheOptions {
   assets: readonly ModelAssetDigest[];
   artifactSetHash: string;
@@ -63,6 +156,12 @@ export class PersistentModelCache {
     this.chunkSize = chunkSize;
   }
 
+  /**
+   * 処理名: ルートパス取得
+   * 処理概要: モデル資材セットのストレージルートパスを返却する。
+   * 実装理由: セットハッシュに基づいた一意の配置先ディレクトリパスを解決するため。
+   * @returns ストレージルートパス。
+   */
   private get root(): string { return `sets/${this.setHash}`; }
 
   /**
@@ -181,8 +280,7 @@ export class PersistentModelCache {
       await this.putSmall(`${this.root}/stage/state.json`, new TextEncoder().encode(JSON.stringify({ schemaVersion: 1, state: "acquiring" })));
       for (const asset of this.assets) await this.acquireAsset(fetcher, asset);
       await this.putSmall(`${this.root}/stage/ready.json`, this.markerBytes());
-    } catch (error) {
-      console.error("DEBUG ACQUIRE ERROR:", error);
+    } catch {
       throw new VectorError("E_ASSET_INTEGRITY");
     }
     for (const asset of this.assets) await this.storage.commit(`${this.root}/stage/files/${asset.path}`, `${this.root}/files/${asset.path}`);

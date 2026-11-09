@@ -1,7 +1,11 @@
-﻿import { VectorError } from "../errors";
+import { VectorError } from "../errors";
 import type { ModelAssetDigest } from "./model-contract";
 
-/** browser fetch署名。 */
+/**
+ * 処理名: ブラウザFetcher型定義
+ * 処理概要: ブラウザ環境におけるfetch関数の型シグネチャを定義する。
+ * 実装理由: モデル資材取得用のfetcher注入インターフェースを統一するため。
+ */
 export type BrowserFetcher = (input: string, init: RequestInit) => Promise<Response>;
 
 /**

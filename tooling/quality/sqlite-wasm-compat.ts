@@ -4,6 +4,11 @@
  * 実装理由: 公式デモとの互換性を網羅的に検証するため。
  */
 
+/**
+ * 処理名: デモケース定義インターフェース
+ * 処理概要: SQLite Wasm公式デモケースの構造を定義する。
+ * 実装理由: 各バンドラー構成ごとの期待結果を型安全に保持するため。
+ */
 export interface SqliteWasmDemoCase {
   name: string;
   bundler: "vite" | "webpack";

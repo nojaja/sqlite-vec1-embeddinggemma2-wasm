@@ -4,10 +4,32 @@ import type { InferenceEngine } from "../inference/engine";
 import { MODEL_ID, MODEL_REPOSITORY, MODEL_REVISION, type ModelAssetDigest } from "../runtime-assets/model-contract";
 import { handleInferenceRequest } from "./inference";
 
-/** controllerが必要とするhost境界。 */
-export interface BrowserControllerHost { postMessage(message: unknown): void; close(): void }
+/**
+ * 処理名: ブラウザコントローラホストインターフェース
+ * 処理概要: コントローラが必要とする親ホストとのメッセージ送受信および終了メソッドを定義する。
+ * 実装理由: Worker通信とコントローラの責務を分離してテスト可能にするため。
+ */
+export interface BrowserControllerHost {
+  /**
+   * 処理名: メッセージ送信
+   * 処理概要: 親ホストへメッセージオブジェクトを送信する。
+   * 実装理由: 状態変更や結果を親スレッドへ通知するため。
+   * @param message - 送信するメッセージ。
+   */
+  postMessage(message: unknown): void;
+  /**
+   * 処理名: ホスト終了
+   * 処理概要: ワーカーコンテキストをクローズする。
+   * 実装理由: 終了時にリソースを確実に破棄するため。
+   */
+  close(): void;
+}
 
-/** 初期化control message。 */
+/**
+ * 処理名: ブラウザコントローラ初期化パラメータ定義
+ * 処理概要: 初期化時に必要な世代番号、バックエンド、マニフェスト、ポート情報を定義する。
+ * 実装理由: ブラウザ推論ワーカーの初期化メッセージを型安全に受け渡すため。
+ */
 export interface BrowserControllerInitialization {
   kind: "initialize";
   generation: number;
@@ -115,7 +137,16 @@ export class BrowserInferenceController {
       this.initialized = true;
       this.engine = await this.createEngine(init);
       this.port = init.inferencePort;
-      this.port.onmessage = (event: MessageEvent<unknown>): void => this.enqueue(() => this.infer(event.data, init.generation));
+      /**
+       * 処理名: ポートメッセージ受信ハンドラ
+       * 処理概要: 受信した推論リクエストをタスクキューへエンキューする。
+       * 実装理由: 推論実行を順序通り直列化して処理するため。
+       * @param event - 受信メッセージイベント。
+       */
+      const onMessage = (event: MessageEvent<unknown>): void => {
+        this.enqueue(() => this.infer(event.data, init.generation));
+      };
+      this.port.onmessage = onMessage;
       this.port.start();
       publishInferenceHealth(this.health, 1);
       this.host.postMessage({ kind: "ready", backend: init.backend, numThreads: 1 });

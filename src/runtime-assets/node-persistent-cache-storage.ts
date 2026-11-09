@@ -1,12 +1,16 @@
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, type Stats } from "node:fs";
 import { lstat, mkdir, open, readFile, realpath, rename, rm, rmdir, type FileHandle } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { VectorError } from "../errors";
 import { positiveOption, splitLogicalPath } from "./cache-path";
 import type { ArtifactWriter, PersistentCacheStorage } from "./persistent-model-cache";
 
-/** Node保存adapterのoption。 */
+/**
+ * 処理名: Node永続キャッシュストレージオプション定義
+ * 処理概要: 最大書き込みバイト数やロックリトライ・タイムアウト時間を定義する。
+ * 実装理由: キャッシュストレージの安全な書き込み制限と競合制御を行うため。
+ */
 export interface NodePersistentCacheOptions { maxWriteBytes?: number; lockRetryMs?: number; lockTimeoutMs?: number }
 
 /**
@@ -18,7 +22,11 @@ export interface NodePersistentCacheOptions { maxWriteBytes?: number; lockRetryM
  */
 function errorCode(error: unknown): string | undefined { return (error as { code?: string } | null)?.code; }
 
-/** Node file writer。 */
+/**
+ * 処理名: Node資材ライタークラス
+ * 処理概要: ファイルハンドルを用いて資材データを追記・アボート・コミットする。
+ * 実装理由: アトミックかつ安全にキャッシュファイルを出力するため。
+ */
 class NodeArtifactWriter implements ArtifactWriter {
   private closed = false;
 
@@ -108,6 +116,18 @@ export class NodePersistentCacheStorage implements PersistentCacheStorage {
   }
 
   /**
+   * 処理名: パスセグメントファイル情報検証
+   * 処理概要: シンボリックリンクを拒否し、中間ディレクトリおよび最終要素の妥当性を確認する。
+   * 実装理由: ルートディレクトリ外へのトラバーサルや不正リンク参照を遮断するため。
+   * @param info - 対象パスのlstat結果オブジェクト。
+   * @param isLast - パスの最終要素かどうかの真偽値。
+   */
+  private assertSegmentType(info: Stats, isLast: boolean): void {
+    if (info.isSymbolicLink() || (!isLast && !info.isDirectory())) throw new VectorError("E_ASSET_INTEGRITY");
+    if (isLast && !info.isFile() && !info.isDirectory()) throw new VectorError("E_ASSET_INTEGRITY");
+  }
+
+  /**
    * 処理名: path解決
    * 処理概要: 論理pathを検証し祖先のsymlink/非directoryを拒否して実pathを返す。
    * 実装理由: root差替えとlink経由の領域外参照を防ぐため。
@@ -122,9 +142,7 @@ export class NodePersistentCacheStorage implements PersistentCacheStorage {
       current = join(current, segment);
       try {
         const info = await lstat(current);
-        const last = index === segments.length - 1;
-        if (info.isSymbolicLink() || (!last && !info.isDirectory())) throw new VectorError("E_ASSET_INTEGRITY");
-        if (last && !info.isFile() && !info.isDirectory()) throw new VectorError("E_ASSET_INTEGRITY");
+        this.assertSegmentType(info, index === segments.length - 1);
       } catch (error) {
         if (error instanceof VectorError) throw error;
         if (errorCode(error) === "ENOENT") break;

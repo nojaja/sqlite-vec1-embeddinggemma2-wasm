@@ -1,6 +1,8 @@
 import type { EmbeddingOptions, ReadyEmbeddingOptions } from "./options";
 import type { EmbeddingCacheIdentity, EmbeddingInference } from "../inference/statement-embedding-cache";
 
+export type { EmbeddingOptions, ReadyEmbeddingOptions };
+
 /**
  * 処理名: 埋め込み拡張制御インターフェース
  * 処理概要: 登録された埋め込み機能の終了処理を提供する。
@@ -21,28 +23,26 @@ export interface EmbeddingControl {
  * 実装理由: 公式SQLite Wasmランタイムとの互換性を保つため。
  */
 export interface Sqlite3Static {
-  /**
-   * 処理名: OO1名前空間
-   * 処理概要: オブジェクト指向データベースクラス群を提供する。
-   * 実装理由: 公式OO1インターフェースを提供するため。
-   */
+  // OO1名前空間
   oo1: {
-    /** データベースクラス */
-    DB: any;
-    /** OPFSデータベースクラス */
-    OpfsDb?: any;
+    // データベースクラス
+    DB: new (...args: unknown[]) => unknown;
+    // OPFSデータベースクラス
+    OpfsDb?: new (...args: unknown[]) => unknown;
   };
-  /** C-APIオブジェクト */
-  capi: any;
-  /** Wasmインスタンスメタ情報 */
-  wasm: any;
+  // C-APIオブジェクト
+  capi: Record<string, unknown>;
+  // Wasmインスタンスメタ情報
+  wasm: Record<string, unknown>;
   /**
    * 処理名: OPFS SAH Pool VFSインストール
    * 処理概要: OPFS同期アクセスコントロールプールVFSを登録する。
    * 実装理由: 高速な永続化ストレージを提供するため。
+   * @param options インストール設定オプション。
+   * @returns インストール結果のプロミス。
    */
-  installOpfsSAHPoolVfs?(options?: any): Promise<any>;
-  [key: string]: any;
+  installOpfsSAHPoolVfs?(options?: Record<string, unknown>): Promise<unknown>;
+  [key: string]: unknown;
 }
 
 /**
@@ -51,7 +51,7 @@ export interface Sqlite3Static {
  * 実装理由: 利用者に公式機能と埋め込み制御の両方を提供するため。
  */
 export type ProductSqlite3 = Sqlite3Static & {
-  /** 埋め込み拡張制御オブジェクト */
+  // 埋め込み拡張制御オブジェクト
   embedding: EmbeddingControl;
 };
 
@@ -61,7 +61,7 @@ export type ProductSqlite3 = Sqlite3Static & {
  * 実装理由: 柔軟な初期化設定を可能にするため。
  */
 export type ProductInitOptions = Record<string, unknown> & {
-  /** 埋め込みオプション */
+  // 埋め込みオプション
   embedding?: EmbeddingOptions | undefined;
 };
 
@@ -69,6 +69,8 @@ export type ProductInitOptions = Record<string, unknown> & {
  * 処理名: 公式ファクトリ型
  * 処理概要: SQLite公式モジュールの初期化関数型。
  * 実装理由: ファクトリ関数を抽象化するため。
+ * @param options 初期化オプション。
+ * @returns SQLite静的オブジェクトのプロミス。
  */
 export type OfficialFactory = (options?: Record<string, unknown>) => Promise<Sqlite3Static>;
 
@@ -78,11 +80,11 @@ export type OfficialFactory = (options?: Record<string, unknown>) => Promise<Sql
  * 実装理由: 推論実行とメタデータを管理するため。
  */
 export interface OfficialInferenceSession {
-  /** 推論関数 */
+  // 推論関数
   infer: EmbeddingInference;
-  /** キャッシュ同一性 */
+  // キャッシュ同一性
   identity: EmbeddingCacheIdentity;
-  /** 付随情報 */
+  // 付随情報
   information: Record<string, unknown>;
   /**
    * 処理名: 準備完了確認
@@ -93,7 +95,7 @@ export interface OfficialInferenceSession {
   /**
    * 処理名: セッション終了
    * 処理概要: 推論セッションのリソースを解放する。
-   * 実装理由: メモリリークを防ぐため。
+   * 実装理由: メモリリークを防ぎ安全に終了するため。
    */
   close(): Promise<void>;
 }
@@ -102,8 +104,11 @@ export interface OfficialInferenceSession {
  * 処理名: 公式推論ファクトリ型
  * 処理概要: 検証済みオプションから推論セッションを生成する関数型。
  * 実装理由: 推論セッションの生成処理を分離するため。
+ * @param options 検証済み埋め込みオプション。
+ * @param extra 追加オプション。
+ * @returns 公式推論セッションのプロミス。
  */
 export type OfficialInferenceFactory = (
   options: ReadyEmbeddingOptions,
-  extra?: any
+  extra?: unknown
 ) => Promise<OfficialInferenceSession>;

@@ -6,17 +6,17 @@ import { VectorError } from "../errors";
  * 実装理由: 異なるモデルや実行環境間でキャッシュが混ざることを防ぐため。
  */
 export interface EmbeddingCacheIdentity {
-  /** モデルID */
+  // モデルID
   modelId: string;
-  /** リビジョン */
+  // リビジョン
   revision: string;
-  /** フィンガープリント */
+  // フィンガープリント
   fingerprint: string;
-  /** プロファイル名 */
+  // プロファイル名
   profile: string;
-  /** バックエンド名 */
+  // バックエンド名
   backend: string;
-  /** 実行時生成番号 */
+  // 実行時生成番号
   runtimeGeneration: number;
 }
 
@@ -26,11 +26,11 @@ export interface EmbeddingCacheIdentity {
  * 実装理由: テキスト推論入力を型定義するため。
  */
 export interface TextEmbeddingCall {
-  /** 操作種別 ("query" または "document") */
+  // 操作種別 ("query" または "document")
   operation: "query" | "document";
-  /** 本文テキスト */
+  // 本文テキスト
   body: unknown;
-  /** タイトル (任意) */
+  // タイトル (任意)
   title?: unknown;
 }
 
@@ -40,11 +40,11 @@ export interface TextEmbeddingCall {
  * 実装理由: マルチモーダル画像推論入力を型定義するため。
  */
 export interface ImageEmbeddingCall {
-  /** 操作種別 ("image") */
+  // 操作種別 ("image")
   operation: "image";
-  /** 画像バイト配列 */
+  // 画像バイト配列
   bytes: Uint8Array;
-  /** MIMEタイプ */
+  // MIMEタイプ
   mime: string;
 }
 
@@ -61,9 +61,9 @@ export type EmbeddingCall = TextEmbeddingCall | ImageEmbeddingCall;
  * 実装理由: 長時間実行やタイムアウト時に推論を安全に中断するため。
  */
 export interface EmbeddingExecutionBudget {
-  /** デッドライン時刻 */
+  // デッドライン時刻
   deadline: number;
-  /** キャンセル同期用共有バッファ */
+  // キャンセル同期用共有バッファ
   cancellationBuffer: SharedArrayBuffer;
 }
 
@@ -71,13 +71,20 @@ export interface EmbeddingExecutionBudget {
  * 処理名: 埋め込み推論関数型
  * 処理概要: テキストまたは画像入力を受け取りベクトルBLOBを同期計算する関数。
  * 実装理由: 推論エンジンとの統一インターフェースを定義するため。
+ * @param request 埋め込み要求オブジェクト。
+ * @param budget 実行予算（タイムアウト・キャンセル情報）。
+ * @returns 計算されたベクトルBLOB、または失敗時null。
  */
 export type EmbeddingInference = (
   request: EmbeddingCall,
   budget?: EmbeddingExecutionBudget
 ) => Uint8Array | null;
 
-/** 統計情報。 */
+/**
+ * 処理名: ステートメントキャッシュ統計情報
+ * 処理概要: ヒット数・ミス数・退避数・推論回数・エントリ数・バイト数を保持する。
+ * 実装理由: キャッシュの効果測定とモニタリングのため。
+ */
 export interface StatementCacheCounters {
   hit: number;
   miss: number;
@@ -95,7 +102,7 @@ const EMBEDDING_BYTES = 3072;
  * 処理名: 埋め込みBLOB検証
  * 処理概要: 正確に3072Bで、768個のFloat32がすべて有限で、L2ノルムが正規化されていることを検証する。
  * 実装理由: 不正な埋め込みベクトルがキャッシュやDBに保存されるのを防ぐため。
- * @param value - 検証対象のUint8Array
+ * @param value 検証対象の値。
  */
 export function validateEmbeddingBlob(value: unknown): void {
   if (!(value instanceof Uint8Array) || value.byteLength % 4 !== 0 || value.byteLength === 0) {
@@ -117,6 +124,11 @@ export function validateEmbeddingBlob(value: unknown): void {
   }
 }
 
+/**
+ * 処理名: キャッシュノードインターフェース
+ * 処理概要: 双方向連結リストのノードとしてキャッシュエントリを保持する。
+ * 実装理由: LRUアルゴリズムによる高速な昇格・退避を実現するため。
+ */
 interface CacheNode {
   keyStr: string;
   imageBytes?: Uint8Array | undefined;
@@ -127,7 +139,23 @@ interface CacheNode {
 }
 
 /**
- * 処理名: StatementEmbeddingCache
+ * 処理名: 画像バイト列一致検証
+ * 処理概要: 2つのバイト配列の長さと内容が完全に一致するか検証する。
+ * 実装理由: 画像埋め込みキャッシュキーの完全一致を判定するため。
+ * @param a キャッシュ内画像バイト配列。
+ * @param b 要求画像バイト配列。
+ * @returns 完全一致する場合true。
+ */
+function isImageBytesMatch(a: Uint8Array | undefined, b: Uint8Array): boolean {
+  if (!a || a.byteLength !== b.byteLength) return false;
+  for (let i = 0; i < b.byteLength; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * 処理名: ステートメント埋め込みキャッシュ
  * 処理概要: SQL statement実行内でのLRU埋め込みキャッシュ。
  * 実装理由: 同一クエリでのORDER BYや複数回評価時の再推論を抑止するため。
  */
@@ -147,6 +175,14 @@ export class StatementEmbeddingCache {
   private currentBytes = 0;
   private currentEntries = 0;
 
+  /**
+   * 処理名: キャッシュ生成
+   * 処理概要: キャッシュ同一性文字列と容量上限を設定してインスタンスを初期化する。
+   * 実装理由: 同一セッション・設定に応じたキャッシュ境界を確立するため。
+   * @param identity キャッシュ識別情報。
+   * @param capacity キャッシュ容量バイト上限。
+   * @param check ヒット時の追加バリデーションコールバック。
+   */
   public constructor(
     identity: EmbeddingCacheIdentity,
     capacity = DEFAULT_CAPACITY,
@@ -167,6 +203,13 @@ export class StatementEmbeddingCache {
     ]);
   }
 
+  /**
+   * 処理名: キャッシュキー計算
+   * 処理概要: 埋め込み要求からJSONキー文字列およびバイトサイズを算出する。
+   * 実装理由: テキスト・画像要求ごとの一意な検索キーを構築するため。
+   * @param request 埋め込み要求。
+   * @returns キー文字列、画像バイト列、キー長。
+   */
   private computeKey(request: EmbeddingCall): { keyStr: string; imageBytes?: Uint8Array; keyByteLen: number } {
     if (request.operation === "image") {
       const tuple = [this.identityStr, request.operation, request.mime, request.bytes.byteLength];
@@ -182,6 +225,14 @@ export class StatementEmbeddingCache {
     }
   }
 
+  /**
+   * 処理名: キャッシュノード探索
+   * 処理概要: キー文字列および画像バイト列に合致する既存ノードを検索する。
+   * 実装理由: LRUキャッシュから合致するエントリを特定するため。
+   * @param keyStr 検索キー文字列。
+   * @param imageBytes 検索対象画像バイト配列。
+   * @returns 合致したキャッシュノード、または未検出時null。
+   */
   private findNode(keyStr: string, imageBytes?: Uint8Array): CacheNode | null {
     const list = this.nodeMap.get(keyStr);
     if (!list) return null;
@@ -189,20 +240,19 @@ export class StatementEmbeddingCache {
       return list[0] ?? null;
     }
     for (const node of list) {
-      if (node.imageBytes && node.imageBytes.byteLength === imageBytes.byteLength) {
-        let match = true;
-        for (let i = 0; i < imageBytes.byteLength; i++) {
-          if (node.imageBytes[i] !== imageBytes[i]) {
-            match = false;
-            break;
-          }
-        }
-        if (match) return node;
+      if (isImageBytesMatch(node.imageBytes, imageBytes)) {
+        return node;
       }
     }
     return null;
   }
 
+  /**
+   * 処理名: ノード切り離し
+   * 処理概要: 指定ノードを双方向連結リストから切り離す。
+   * 実装理由: LRUリストにおける順序更新や削除を行うため。
+   * @param node 切り離し対象ノード。
+   */
   private detachNode(node: CacheNode): void {
     if (node.prev) node.prev.next = node.next;
     else this.head = node.next;
@@ -212,6 +262,12 @@ export class StatementEmbeddingCache {
     node.next = null;
   }
 
+  /**
+   * 処理名: ノード先頭挿入
+   * 処理概要: 指定ノードを双方向連結リストの先頭（最新）に配置する。
+   * 実装理由: LRUアクセス順を更新するため。
+   * @param node 先頭に配置するノード。
+   */
   private attachHead(node: CacheNode): void {
     node.next = this.head;
     node.prev = null;
@@ -220,6 +276,11 @@ export class StatementEmbeddingCache {
     if (!this.tail) this.tail = node;
   }
 
+  /**
+   * 処理名: 末尾ノード退避
+   * 処理概要: 最も古く使われた末尾ノードをキャッシュから退避・削除する。
+   * 実装理由: 容量超過または最大エントリ数超過時に空き領域を確保するため。
+   */
   private evictTail(): void {
     if (!this.tail) return;
     const old = this.tail;
@@ -235,6 +296,14 @@ export class StatementEmbeddingCache {
     this.evictionCount++;
   }
 
+  /**
+   * 処理名: 埋め込み解決
+   * 処理概要: キャッシュヒット時はキャッシュ値を返し、ミス時は推論を実行してキャッシュに保存する。
+   * 実装理由: SQL文実行中の重複推論を防止しレスポンスを向上させるため。
+   * @param request 埋め込み要求。
+   * @param infer 推論実行関数。
+   * @returns 埋め込みベクトルBLOB、または推論失敗時null。
+   */
   public resolve(request: EmbeddingCall, infer: EmbeddingInference): Uint8Array | null {
     if (this.disposed) {
       throw new VectorError("E_PROTOCOL");
@@ -287,6 +356,11 @@ export class StatementEmbeddingCache {
     return res.slice();
   }
 
+  /**
+   * 処理名: キャッシュ破棄
+   * 処理概要: キャッシュノードおよびマップをクリアし破棄状態にする。
+   * 実装理由: ステートメント終了時にリソースを解放するため。
+   */
   public dispose(): void {
     this.disposed = true;
     this.head = null;
@@ -296,6 +370,12 @@ export class StatementEmbeddingCache {
     this.currentEntries = 0;
   }
 
+  /**
+   * 処理名: キャッシュ統計取得
+   * 処理概要: キャッシュのヒット・ミス・退避等の統計カウンタを取得する。
+   * 実装理由: キャッシュ動作のプロファイリングのため。
+   * @returns キャッシュ統計カウンタ。
+   */
   public statistics(): StatementCacheCounters {
     return {
       hit: this.hitCount,

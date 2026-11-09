@@ -94,7 +94,11 @@ export function computeSha256Hex(bytes: Uint8Array): string {
   return hex;
 }
 
-/** 検証済みbytesの読出し関数。 */
+/**
+ * 処理名: 検証済み資材読み出し関数型定義
+ * 処理概要: パスを指定して検証済みの資材バイト配列を非同期に読み出す関数シグネチャを定義する。
+ * 実装理由: キャッシュストレージからの資材読み出し処理を抽象化するため。
+ */
 export type VerifiedAssetReader = (path: string) => Promise<Uint8Array | undefined>;
 
 const LOCAL_PREFIX = `/models/${MODEL_REPOSITORY}/`;

@@ -3,6 +3,12 @@ import { Worker, isMainThread, parentPort, workerData } from "node:worker_thread
 import { startLocalModelServer } from "../test/integration/local-model-server";
 import type { ProductInitOptions, ProductSqlite3 } from "../src/official/types";
 
+/**
+ * 処理名: セマンティック検索ワーカー処理
+ * 処理概要: SQLiteインメモリDBを作成し、埋め込みベクトル生成とコサイン距離検索を実行する。
+ * 実装理由: EmbeddingGemma-2によるセマンティック検索機能を実証するため。
+ * @param baseUrl - モデル配信サーバーのベースURL。
+ */
 async function runDemoWorker(baseUrl: string): Promise<void> {
   const initModule = require(resolve("dist/node/index.js")) as { default: (options?: ProductInitOptions) => Promise<ProductSqlite3> };
   const sqlite3 = await initModule.default({
@@ -51,6 +57,20 @@ async function runDemoWorker(baseUrl: string): Promise<void> {
       console.log(`\n検索クエリ: "${query}"`);
       const results: Array<{ id: number; text_data: string; distance: number }> = [];
 
+      /**
+       * 処理名: 検索結果行追加
+       * 処理概要: 取得したレコードを型安全に抽出して結果配列に格納する。
+       * 実装理由: 各行のデータ型を保証して表示処理へ渡すため。
+       * @param row - DB行オブジェクト。
+       */
+      const pushRow = (row: Record<string, unknown>): void => {
+        results.push({
+          id: Number(row.id),
+          text_data: String(row.text_data),
+          distance: Number(row.distance)
+        });
+      };
+
       db.exec({
         sql: `
           SELECT id, text_data, DISTANCE(embedding, embedding_query(?)) AS distance
@@ -60,13 +80,7 @@ async function runDemoWorker(baseUrl: string): Promise<void> {
         `,
         bind: [query, query],
         rowMode: "object",
-        callback: (row: any) => {
-          results.push({
-            id: Number(row.id),
-            text_data: String(row.text_data),
-            distance: Number(row.distance)
-          });
-        }
+        callback: pushRow
       });
 
       for (const r of results) {
@@ -81,6 +95,11 @@ async function runDemoWorker(baseUrl: string): Promise<void> {
   }
 }
 
+/**
+ * 処理名: セマンティック検索デモメイン処理
+ * 処理概要: モデルサーバーを起動し、ワーカーでデモシナリオを実行する。
+ * 実装理由: CLIからデモを実行するためのメインエントリを提供するため。
+ */
 async function main(): Promise<void> {
   const server = await startLocalModelServer();
   const worker = new Worker(__filename, { execArgv: [], workerData: { baseUrl: server.baseUrl } });

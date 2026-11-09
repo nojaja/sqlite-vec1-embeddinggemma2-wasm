@@ -10,15 +10,32 @@ import type { PortableRuntime } from "../inference/engine";
  */
 export const WORKER_NAME = "inference-browser";
 
+/**
+ * 処理名: 親コンテキストメッセージ送信
+ * 処理概要: globalThisのpostMessageを呼び出し親コンテキストへメッセージを送信する。
+ * 実装理由: Web Worker通信インターフェースを抽象化するため。
+ * @param message - 送信するメッセージデータ。
+ */
+function sendToHost(message: unknown): void {
+  globalThis.postMessage(message);
+}
+
+/**
+ * 処理名: ワーカー終了処理
+ * 処理概要: クローズ通知を送信しglobalThisのcloseを呼び出してWorkerを終了する。
+ * 実装理由: ワーカーリソースを確実に破棄するため。
+ */
+function closeWorker(): void {
+  globalThis.postMessage({ kind: "closed" });
+  if (typeof (globalThis as unknown as { close?: () => void }).close === "function") {
+    (globalThis as unknown as { close: () => void }).close();
+  }
+}
+
 const controller = new BrowserInferenceController(
   {
-    postMessage: (message: unknown) => globalThis.postMessage(message),
-    close: () => {
-      globalThis.postMessage({ kind: "closed" });
-      if (typeof (globalThis as unknown as { close?: () => void }).close === "function") {
-        (globalThis as unknown as { close: () => void }).close();
-      }
-    }
+    postMessage: sendToHost,
+    close: closeWorker
   },
   async (init) => {
     const prep = await prepareBrowserInference({

@@ -9,6 +9,10 @@ const distDir = path.resolve(rootDir, "dist");
 
 /**
  * 処理名: SHA-256計算
+ * 処理概要: バッファまたは文字列のSHA-256ハッシュ値を16進数文字列で算出する。
+ * 実装理由: 生成資材の整合性検証ハッシュを記録するため。
+ * @param data - ハッシュ計算対象のバッファまたは文字列。
+ * @returns 算出されたSHA-256の16進数文字列。
  */
 function sha256Hex(data: Buffer | string): string {
   return crypto.createHash("sha256").update(data).digest("hex");
@@ -16,6 +20,10 @@ function sha256Hex(data: Buffer | string): string {
 
 /**
  * 処理名: 全ファイル走査
+ * 処理概要: 指定ディレクトリ配下の全ファイルパスを再帰的に収集する。
+ * 実装理由: distディレクトリ内の全成果物リストを構築するため。
+ * @param dir - 走査対象のディレクトリパス。
+ * @returns 収集された全ファイルの絶対パス配列。
  */
 function walk(dir: string): string[] {
   let results: string[] = [];
@@ -32,7 +40,13 @@ function walk(dir: string): string[] {
   return results;
 }
 
-async function main() {
+/**
+ * 処理名: パッケージビルド主処理
+ * 処理概要: 推論ビルド、公式資材配置、各エントリポイントのバンドル、型定義配置、レポート生成を実行する。
+ * 実装理由: 配布用パッケージ成果物を一括生成するため。
+ * @returns 完了Promise。
+ */
+async function main(): Promise<void> {
   console.log("=== Starting product build ===");
 
   // 1. 推論ビルドを実行
@@ -59,6 +73,16 @@ async function main() {
     );
   }
 
+  // 公式資材に上流バグ修正パッチを適用
+  childProcess.execFileSync("git", [
+    "apply",
+    "--unidiff-zero",
+    "--ignore-space-change",
+    "--ignore-whitespace",
+    "--directory=dist",
+    "patches/sqlite-official.patch"
+  ], { stdio: "inherit" });
+
   // 3. 各エントリーポイントのバンドル
   console.log("[3/5] Bundling product entry points and samples...");
   fs.mkdirSync(path.resolve(distDir, "node"), { recursive: true });
@@ -68,7 +92,7 @@ async function main() {
   fs.mkdirSync(path.resolve(distDir, "samples/browser"), { recursive: true });
   fs.mkdirSync(path.resolve(distDir, "reports"), { recursive: true });
 
-  const metafiles: any[] = [];
+  const metafiles: (import("esbuild").Metafile | undefined)[] = [];
 
   const cjsNodeBanner = {
     js: "const __svw_import_meta_url = require('node:url').pathToFileURL(__filename).href;\nconst __svw_import_meta = { url: __svw_import_meta_url };"
@@ -221,63 +245,13 @@ async function main() {
     ""
   ].join("\n");
   fs.writeFileSync(path.resolve(distDir, "index.d.ts"), indexDts);
+  fs.writeFileSync(path.resolve(distDir, "index.d.mts"), indexDts);
   fs.writeFileSync(path.resolve(distDir, "index-browser.d.ts"), indexDts);
 
   // 5. レポートおよびロックファイルの生成
   console.log("[5/5] Generating reports and runtime-lock...");
 
-  // 5.1 esbuild-metafile.json
-  const mergedInputs: Record<string, any> = {};
-  const mergedOutputs: Record<string, any> = {};
-  for (const m of metafiles) {
-    if (m?.inputs) Object.assign(mergedInputs, m.inputs);
-    if (m?.outputs) Object.assign(mergedOutputs, m.outputs);
-  }
-  fs.writeFileSync(
-    path.resolve(distDir, "reports/esbuild-metafile.json"),
-    JSON.stringify({ inputs: mergedInputs, outputs: mergedOutputs }, null, 2) + "\n"
-  );
-
-  // 5.2 build-content.json
-  const allDistFiles = walk(distDir).map((f) => {
-    const rel = path.relative(distDir, f).replace(/\\/g, "/");
-    const buf = fs.readFileSync(f);
-    return {
-      path: `dist/${rel}`,
-      bytes: buf.length,
-      sha256: sha256Hex(buf)
-    };
-  });
-  allDistFiles.sort((a, b) => a.path.localeCompare(b.path));
-  fs.writeFileSync(
-    path.resolve(distDir, "reports/build-content.json"),
-    JSON.stringify({ schemaVersion: 1, files: allDistFiles }, null, 2) + "\n"
-  );
-
-  // 5.3 sbom.cdx.json (CycloneDX 1.6)
-  const sbom = {
-    bomFormat: "CycloneDX",
-    specVersion: "1.6",
-    version: 1,
-    metadata: {
-      component: {
-        name: "sqlite-vec1-embeddinggemma2-wasm",
-        version: "0.0.3",
-        type: "library"
-      }
-    },
-    components: allDistFiles.map((f) => ({
-      name: f.path,
-      type: "file",
-      hashes: [{ alg: "SHA-256", content: f.sha256 }]
-    }))
-  };
-  fs.writeFileSync(
-    path.resolve(distDir, "reports/sbom.cdx.json"),
-    JSON.stringify(sbom, null, 2) + "\n"
-  );
-
-  // 5.4 manifests/runtime-lock.json
+  // 5.1 ランタイムロック (manifests/runtime-lock.json & dist/runtime-lock.json)
   const REQUIRED_RUNTIME_ASSETS = [
     "wabt-source",
     "sqlite-official-wasm",
@@ -307,6 +281,7 @@ async function main() {
 
   const portablePatch = fs.readFileSync(path.resolve(rootDir, "patches/transformers-portable.patch"));
   const directmlPatch = fs.readFileSync(path.resolve(rootDir, "patches/transformers-directml.patch"));
+  const sqliteOfficialPatch = fs.readFileSync(path.resolve(rootDir, "patches/sqlite-official.patch"));
 
   const runtimeLock = {
     schemaVersion: 1,
@@ -319,6 +294,10 @@ async function main() {
       "patches/transformers-directml.patch": {
         bytes: directmlPatch.length,
         sha256: sha256Hex(directmlPatch)
+      },
+      "patches/sqlite-official.patch": {
+        bytes: sqliteOfficialPatch.length,
+        sha256: sha256Hex(sqliteOfficialPatch)
       }
     },
     toolchain: {
@@ -327,10 +306,60 @@ async function main() {
       arch: process.arch
     }
   };
+  const lockJson = JSON.stringify(runtimeLock, null, 2) + "\n";
   fs.mkdirSync(path.resolve(rootDir, "manifests"), { recursive: true });
+  fs.writeFileSync(path.resolve(rootDir, "manifests/runtime-lock.json"), lockJson);
+  fs.writeFileSync(path.resolve(distDir, "runtime-lock.json"), lockJson);
+
+  // 5.2 esbuild-metafile.json
+  const mergedInputs: Record<string, unknown> = {};
+  const mergedOutputs: Record<string, unknown> = {};
+  for (const m of metafiles) {
+    if (m?.inputs) Object.assign(mergedInputs, m.inputs);
+    if (m?.outputs) Object.assign(mergedOutputs, m.outputs);
+  }
   fs.writeFileSync(
-    path.resolve(rootDir, "manifests/runtime-lock.json"),
-    JSON.stringify(runtimeLock, null, 2) + "\n"
+    path.resolve(distDir, "reports/esbuild-metafile.json"),
+    JSON.stringify({ inputs: mergedInputs, outputs: mergedOutputs }, null, 2) + "\n"
+  );
+
+  // 5.3 build-content.json
+  const allDistFiles = walk(distDir).map((f) => {
+    const rel = path.relative(distDir, f).replace(/\\/g, "/");
+    const buf = fs.readFileSync(f);
+    return {
+      path: `dist/${rel}`,
+      bytes: buf.length,
+      sha256: sha256Hex(buf)
+    };
+  });
+  allDistFiles.sort((a, b) => a.path.localeCompare(b.path));
+  fs.writeFileSync(
+    path.resolve(distDir, "reports/build-content.json"),
+    JSON.stringify({ schemaVersion: 1, files: allDistFiles }, null, 2) + "\n"
+  );
+
+  // 5.4 sbom.cdx.json (CycloneDX 1.6)
+  const sbom = {
+    bomFormat: "CycloneDX",
+    specVersion: "1.6",
+    version: 1,
+    metadata: {
+      component: {
+        name: "sqlite-vec1-embeddinggemma2-wasm",
+        version: "0.0.3",
+        type: "library"
+      }
+    },
+    components: allDistFiles.map((f) => ({
+      name: f.path,
+      type: "file",
+      hashes: [{ alg: "SHA-256", content: f.sha256 }]
+    }))
+  };
+  fs.writeFileSync(
+    path.resolve(distDir, "reports/sbom.cdx.json"),
+    JSON.stringify(sbom, null, 2) + "\n"
   );
 
   console.log("=== Product build completed successfully ===");

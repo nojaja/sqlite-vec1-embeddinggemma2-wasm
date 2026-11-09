@@ -1,13 +1,42 @@
-﻿import { VectorError } from "../errors";
+import { VectorError } from "../errors";
 import { EMBEDDING_DIMENSION } from "./profile";
 
-/** 品質比較用の1組。 */
+/**
+ * 処理名: 埋め込み品質比較ペアインターフェース
+ * 処理概要: 識別ID、モダリティ種別、候補ベクトル、参照ベクトルを定義する。
+ * 実装理由: 候補と参照のペアごとのコサイン類似度検証を行うため。
+ */
 export interface EmbeddingQualityPair { id: string; modality: "text" | "image"; candidate: Float32Array; reference: Float32Array }
-/** modality別閾値。 */
-export interface EmbeddingQualityThresholds { text: { mean: number; each: number }; image: { mean: number; each: number } }
-/** modality別結果。 */
+
+/**
+ * 処理名: 埋め込み品質閾値制限インターフェース
+ * 処理概要: 平均値および個別最小値に対する類似度閾値を定義する。
+ * 実装理由: 各モダリティの許容誤差判定基準を保持するため。
+ */
+export interface EmbeddingThresholdLimit {
+  mean: number;
+  each: number;
+}
+
+/**
+ * 処理名: モダリティ別品質閾値インターフェース
+ * 処理概要: テキストおよび画像それぞれの類似度閾値設定を保持する。
+ * 実装理由: モダリティごとに異なる品質要件を適用するため。
+ */
+export interface EmbeddingQualityThresholds { text: EmbeddingThresholdLimit; image: EmbeddingThresholdLimit }
+
+/**
+ * 処理名: モダリティ別品質統計インターフェース
+ * 処理概要: 検証件数、平均類似度、最小類似度、判定結果を保持する。
+ * 実装理由: モダリティごとの集計統計情報を表現するため。
+ */
 export interface EmbeddingQualityStat { count: number; mean: number; minimum: number; passed: boolean }
-/** 品質report。 */
+
+/**
+ * 処理名: 埋め込み品質レポートインターフェース
+ * 処理概要: 全体合否判定およびテキスト・画像それぞれの統計結果を定義する。
+ * 実装理由: 品質検証結果をレポートとして構造化するため。
+ */
 export interface EmbeddingQualityReport { passed: boolean; text: EmbeddingQualityStat; image: EmbeddingQualityStat }
 
 /**
@@ -51,7 +80,7 @@ function cosine(pair: EmbeddingQualityPair): number {
  * @param threshold - 閾値。
  * @returns 集計結果。
  */
-function summarize(values: number[], threshold: { mean: number; each: number }): EmbeddingQualityStat {
+function summarize(values: number[], threshold: EmbeddingThresholdLimit): EmbeddingQualityStat {
   const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
   const minimum = Math.min(...values);
   return { count: values.length, mean, minimum, passed: mean >= threshold.mean && minimum >= threshold.each };

@@ -1,6 +1,10 @@
-﻿import { VectorError } from "../errors";
+import { VectorError } from "../errors";
 
-/** 応答の読出し結果。 */
+/**
+ * 処理名: ブリッジ応答インターフェース
+ * 処理概要: ワーカーからの応答ペイロードとエラーIDを保持する。
+ * 実装理由: 共有メモリ経由で受信した応答データを型安全に受け渡すため。
+ */
 export interface BridgeResponse { payload: Uint8Array; errorId: number }
 
 const HEADER_BYTES = 32;
@@ -115,6 +119,27 @@ export function abandonResponse(buffer: SharedArrayBuffer): boolean {
 }
 
 /**
+ * 処理名: 待機中断判定
+ * 処理概要: キャンセルフラグまたはタイムアウト到達に応じてレスポンスを破棄し例外を発生させる。
+ * 実装理由: waitResponseループ内の複雑度を低減するため。
+ * @param buffer - 応答バッファ。
+ * @param flag - キャンセルフラグ配列。
+ * @param remaining - タイムアウトまでの残りミリ秒。
+ * @returns 処理を再試行すべきかどうかの真偽値。
+ */
+function checkInterruption(buffer: SharedArrayBuffer, flag: Int32Array, remaining: number): boolean {
+  if (Atomics.load(flag, 0) !== 0) {
+    if (abandonResponse(buffer)) throw new VectorError("E_CANCELLED");
+    return true;
+  }
+  if (remaining <= 0) {
+    if (abandonResponse(buffer)) throw new VectorError("E_TIMEOUT");
+    return true;
+  }
+  return false;
+}
+
+/**
  * 処理名: 応答待機
  * 処理概要: terminal観測、cancel、deadlineを最大50ms間隔で確認して待つ。
  * 実装理由: 通知先行を取りこぼさず無期限waitを避けるため。
@@ -131,15 +156,8 @@ export function waitResponse(buffer: SharedArrayBuffer, cancel: SharedArrayBuffe
     const current = Atomics.load(state, 0);
     if (current === OK || current === ERROR) return readResponse(buffer);
     if (current === ABANDONED) throw new VectorError("E_CANCELLED");
-    if (Atomics.load(flag, 0) !== 0) {
-      if (abandonResponse(buffer)) throw new VectorError("E_CANCELLED");
-      continue;
-    }
     const remaining = deadline - performance.now();
-    if (remaining <= 0) {
-      if (abandonResponse(buffer)) throw new VectorError("E_TIMEOUT");
-      continue;
-    }
+    if (checkInterruption(buffer, flag, remaining)) continue;
     Atomics.wait(state, 0, current, Math.min(50, remaining));
   }
 }

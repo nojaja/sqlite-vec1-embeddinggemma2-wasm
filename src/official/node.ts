@@ -8,6 +8,20 @@ import { createNodeInferenceSession } from "./node-inference";
 import { installNodeFileVfs } from "./node-vfs";
 
 /**
+ * 処理名: Node VFSハンドルインターフェース
+ * 処理概要: インストールされたNode VFSのクローズ処理を提供する。
+ * 実装理由: データベース終了時にVFSリソースを解放するため。
+ */
+interface NodeVfsHandle {
+  /**
+   * 処理名: VFSクローズ
+   * 処理概要: VFSリソースを解放する。
+   * 実装理由: リークを防ぐため。
+   */
+  close(): void;
+}
+
+/**
  * 処理名: Node向けSQLite3ランタイム初期化
  * 処理概要: Node.js環境向けに公式SQLite3ランタイムと埋め込み拡張を初期化する。
  * 実装理由: Node.js上でベクトル検索付きSQLiteを利用可能にするため。
@@ -18,8 +32,16 @@ export default async function initialize(options: ProductInitOptions = {}): Prom
   if (options.embedding && isMainThread) {
     throw new VectorError("E_ENVIRONMENT");
   }
-  let nodeVfs: { close(): void } | undefined;
-  const factory = async (opts: any = {}) => {
+  let nodeVfs: NodeVfsHandle | undefined;
+
+  /**
+   * 処理名: 公式SQLiteファクトリ呼び出し
+   * 処理概要: 公式sqlite3-node.mjsを動的インポートしWasmパスを解決してインスタンス化する。
+   * 実装理由: Node環境でのSQLite Wasmランタイムを生成するため。
+   * @param opts - 初期化オプションレコード。
+   * @returns SQLite3公式インスタンス。
+   */
+  async function factory(opts: Record<string, unknown> = {}): Promise<unknown> {
     const mod = await import("../../downloads/sqlite-official/sqlite3-node.mjs");
     const locateFile = opts.locateFile ?? ((file: string) => {
       if (file === "sqlite3.wasm") {
@@ -36,10 +58,11 @@ export default async function initialize(options: ProductInitOptions = {}): Prom
       }
       return file;
     });
-    const sqlite3 = await mod.default({ locateFile, ...opts });
+    const sqlite3 = await (mod.default as (options: unknown) => Promise<unknown>)({ locateFile, ...opts });
     nodeVfs = installNodeFileVfs(sqlite3);
     return sqlite3;
-  };
+  }
+
   const sqlite3 = await initializeOfficialRuntime(
     factory,
     options,
@@ -54,10 +77,17 @@ export default async function initialize(options: ProductInitOptions = {}): Prom
   );
   if (nodeVfs && sqlite3.embedding) {
     const origClose = sqlite3.embedding.close.bind(sqlite3.embedding);
-    sqlite3.embedding.close = async () => {
+    /**
+     * 処理名: 拡張およびVFS終了処理
+     * 処理概要: 埋め込みセッションを解放後、Node VFSをクローズする。
+     * 実装理由: 関連リソースを安全かつ順序通りに破棄するため。
+     * @returns 完了Promise。
+     */
+    const closeAll = async (): Promise<void> => {
       await origClose();
       nodeVfs?.close();
     };
+    sqlite3.embedding.close = closeAll;
   }
   return sqlite3;
 }
