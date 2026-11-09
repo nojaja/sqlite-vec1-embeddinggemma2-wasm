@@ -61,9 +61,9 @@ unit は 35 ファイル、E2E は 4 ファイル、統合テストを含め `te
 | `official-functions.test.ts` | model 検証が NULL/READY より先、型/空白/NUL、query/document/title 写像 |
 | `official-initialize.test.ts` | 公式 option 転送、embedding 省略 prepare 0、READY 待機、DB close 前拒否、pool pause だけ |
 | `official-metadata.test.ts` | 7 key 版/空間、一致、backend 非保存、未知 schema/混在拒否 |
-| `official-node-entry.test.ts` | main thread で model アクセス前に環境拒否 (`E_ENVIRONMENT`) |
+| `official-node-entry.test.ts` | main thread 推論初期化許可（E_ENVIRONMENT 拒否の撤廃）、環境情報引継ぎ |
 | `official-node-files.test.ts` | ownership 競合、short read ゼロ埋め、fsync/write/reopen、symlink 拒否、temporary 回収 |
-| `official-options.test.ts` | 省略、main 拒否、matrix、1/1800000 境界、0/NaN/Infinity/unknown 拒否 |
+| `official-options.test.ts` | 省略、main 許可、matrix、1/1800000 境界、0/NaN/Infinity/unknown 拒否 |
 | `official-public-exports.test.ts` | default initializer、browser named promiser、廃止 API を公開しない |
 | `official-runtime.test.ts` | 実 SQLite transactions/NULL、2 Stmt trace/authorizer、DIRECTONLY、metadata、DISTANCE |
 | `persistent-model-cache.test.ts` | cold stage/ready、offline 通信 0、corrupt online 修復、明示 recover、別 set/DB 保護 |
@@ -72,7 +72,7 @@ unit は 35 ファイル、E2E は 4 ファイル、統合テストを含め `te
 | `release-audit.test.ts` | 全 severity 0 のみ受理、件数不正/不整合/脆弱性を拒否 |
 | `statement-embedding-cache.test.ts` | copy、用途/title/key、10/11 LRU、画像全 bytes、実 32MiB、超過 bypass、NULL/error 非保存 |
 | `statement-lifecycle.test.ts` | ROW 保持/DONE/reset 世代、交互接続/Stmt、close/finalize/error、pause 期限/cancel |
-| `vector-type-and-model-resolution-spec.test.ts` | gemma_embed_* 廃止、VECTOR 型 DDL 解析、[model] 自動解決、動的プロファイル、ゼロダウンロード、遅延初期化 |
+| `vector-type-and-model-resolution-spec.test.ts` | VECTOR 型 DDL 解析、[model] 自動解決、動的プロファイル、ゼロダウンロード、推論事前準備・warm-up保証（省略時ゼロオーバーヘッド） |
 | `verified-cache.test.ts` | 2 prefix だけ、未知 key、毎 read size/hash、put は同内容だけ |
 
 ---

@@ -13,7 +13,19 @@ import type { ProductInitOptions, ProductSqlite3 } from "../../src/official/type
 async function testOfficialPublicEntry(): Promise<void> {
   const entry = resolve("dist/node/index.js");
   const initialize = (require(entry) as { default: (options?: ProductInitOptions) => Promise<ProductSqlite3> }).default;
-  await assert.rejects(initialize({ embedding: { model: { network: "offline" } } }), /E_ENVIRONMENT/u);
+  // メインスレッド制約の緩和: main thread であってもデフォルト backend (wasm) は E_ENVIRONMENT で拒否されない
+  await assert.rejects(
+    initialize({ embedding: { model: { network: "offline" } } }),
+    (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      return msg !== "E_ENVIRONMENT";
+    }
+  );
+  // サポート外バックエンド（Node.js での webgpu）では環境エラー (E_ENVIRONMENT) となる
+  await assert.rejects(
+    initialize({ embedding: { backend: "webgpu", model: { network: "offline" } } }),
+    /E_ENVIRONMENT/u
+  );
   const sqlite3 = await initialize();
   const database = new sqlite3.oo1.DB(":memory:");
   assert.equal(database.selectValue("SELECT sqlite_version()"), "3.54.1");

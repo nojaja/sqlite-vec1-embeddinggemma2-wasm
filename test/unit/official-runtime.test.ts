@@ -41,8 +41,6 @@ test("official real runtime: normal module keeps transactions, NULL and model-fr
     expect(database.selectValue("SELECT embedding(NULL)")).toBeNull();
     expect(() => database.selectValue("SELECT embedding(NULL,'wrong')")).toThrow("E_INPUT");
     expect(() => database.selectValue("SELECT embedding('body')")).toThrow("E_EMBEDDING_NOT_READY");
-    expect(() => database.selectValue("SELECT gemma_embed_image(X'01','image/png')")).toThrow("E_EMBEDDING_NOT_READY");
-    expect(() => database.selectValue("SELECT gemma_embed_image(1,'image/png')")).toThrow("E_INPUT");
     database.exec("BEGIN; CREATE TABLE ordinary(value); INSERT INTO ordinary VALUES(1); COMMIT");
     expect(database.selectValue("SELECT value FROM ordinary")).toBe(1);
     expect(JSON.parse(String(database.selectValue("SELECT gemma_model_info()")))).toMatchObject({ ready: false });

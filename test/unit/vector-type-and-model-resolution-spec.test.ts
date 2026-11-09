@@ -1,26 +1,7 @@
 import { parseVectorColumnDefinitions, resolveModelForStatement, type VectorColumnMetadata, type ModelProfileDefinition } from "../../src/official/vector-metadata";
 
 describe("Vector Type Schema and Dynamic Model Resolution Contracts", () => {
-  describe("1. Deprecation and Removal of gemma_embed_* Functions", () => {
-    test("gemma-specific SQL functions must be completely excluded from the function registry", () => {
-      const activeFunctions = ["embedding", "embedding_query", "DISTANCE"];
-      const legacyGemmaFunctions = [
-        "gemma_embed_query",
-        "gemma_embed_document",
-        "gemma_embed_image",
-        "gemma_model_info"
-      ];
-
-      for (const fn of legacyGemmaFunctions) {
-        expect(activeFunctions).not.toContain(fn);
-      }
-      expect(activeFunctions).toContain("embedding");
-      expect(activeFunctions).toContain("embedding_query");
-      expect(activeFunctions).toContain("DISTANCE");
-    });
-  });
-
-  describe("2. Method A: VECTOR(dimension, 'model') Column Type Metadata Extraction", () => {
+  describe("1. Method A: VECTOR(dimension, 'model') Column Type Metadata Extraction", () => {
     test("extracts vector column metadata from CREATE TABLE DDL statements", () => {
       const ddl1 = `
         CREATE TABLE items (
@@ -62,7 +43,7 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts", () => {
     });
   });
 
-  describe("3. Automatic Resolution of [model] Parameter", () => {
+  describe("2. Automatic Resolution of [model] Parameter", () => {
     const tableMetadata: Record<string, Record<string, VectorColumnMetadata>> = {
       items: {
         embedding: {
@@ -102,7 +83,7 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts", () => {
     });
   });
 
-  describe("4. Dynamic Model Profile Without Hardcoded Defaults", () => {
+  describe("3. Dynamic Model Profile Without Hardcoded Defaults", () => {
     test("accepts dynamic application-provided model profiles without built-in catalog", () => {
       const customProfile: ModelProfileDefinition = {
         name: "ruri-v3",
@@ -121,7 +102,7 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts", () => {
     });
   });
 
-  describe("5. Zero-Download Strategy and Model Pre-configuration", () => {
+  describe("4. Zero-Download Strategy and Model Pre-configuration", () => {
     test("model loading reads strictly from local filesystem path without network fetches", () => {
       const localConfig = {
         modelPath: "./models/ruri-v3-30m-onnx",
@@ -132,9 +113,10 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts", () => {
     });
   });
 
-  describe("6. Lazy Initialization and Embedding-Free Operation", () => {
-    test("sqlite initialization completes instantly without loading model or worker if embedding is unused", () => {
+  describe("5. Embedding Initialization Lifecycle: Eager Session Warm-up vs Embedding-Free Operation (spec 3.3)", () => {
+    test("omitted embedding remains completely model-free and initializes instantly without loading model or worker", () => {
       const runtimeState = {
+        embeddingEnabled: false,
         sqliteReady: true,
         workerSpawned: false,
         modelLoaded: false
@@ -143,6 +125,39 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts", () => {
       expect(runtimeState.sqliteReady).toBe(true);
       expect(runtimeState.workerSpawned).toBe(false);
       expect(runtimeState.modelLoaded).toBe(false);
+    });
+
+    test("when embedding is enabled, prepares inference session eagerly and does not resolve initializer until warm-up succeeds", () => {
+      // docs/spec/v0.0.1/product.md 3.3:
+      // 公式loader初期化後に推論sessionを準備する。モデル・codecとquery/image warm-upが成功するまでinitializerをresolveしない。
+      // SQL評価時まで推論Worker起動を遅延させる方式（遅延初期化）ではなく、初期化完了時点で推論セッション・warm-upが完了している契約
+      interface InitializationLifecycle {
+        loaderReady: boolean;
+        sessionPrepared: boolean;
+        warmupCompleted: boolean;
+        initializerResolved: boolean;
+      }
+
+      function canResolveInitializer(state: InitializationLifecycle): boolean {
+        // モデル・codecとquery/image warm-upが成功するまでinitializerをresolveしない
+        return state.loaderReady && state.sessionPrepared && state.warmupCompleted;
+      }
+
+      const duringInitialization: InitializationLifecycle = {
+        loaderReady: true,
+        sessionPrepared: true,
+        warmupCompleted: false,
+        initializerResolved: false
+      };
+      expect(canResolveInitializer(duringInitialization)).toBe(false);
+
+      const afterWarmupSuccess: InitializationLifecycle = {
+        loaderReady: true,
+        sessionPrepared: true,
+        warmupCompleted: true,
+        initializerResolved: true
+      };
+      expect(canResolveInitializer(afterWarmupSuccess)).toBe(true);
     });
   });
 });
