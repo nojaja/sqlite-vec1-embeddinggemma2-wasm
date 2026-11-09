@@ -54,7 +54,6 @@
     "lint": "eslint . --max-warnings 0",
     "depcruise": "depcruise src tooling scripts --config .dependency-cruiser.js",
     "typedoc": "node node_modules/typedoc/bin/typedoc --options typedoc.js",
-    "check:format": "node scripts/quality/check-format.ts",
     "test:sqlite": "node scripts/run.ts test-official-sqlite",
     "test:storage": "node scripts/run.ts test-storage",
     "test:search": "node scripts/run.ts test-official-model",

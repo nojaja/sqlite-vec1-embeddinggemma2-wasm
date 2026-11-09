@@ -38,7 +38,7 @@ test("official initializer: releases SAH pool handles without removing persisten
   const install = jest.fn(async () => pool);
   const factory = jest.fn(async () => ({ installOpfsSAHPoolVfs: install })) as unknown as OfficialFactory;
   const result = await initializeOfficialRuntime(factory, {}, { worker: true, runtime: "browser", platform: "browser", architecture: "browser" });
-  await result.installOpfsSAHPoolVfs({ clearOnInit: false, preserveOnInitFailure: true });
+  await result.installOpfsSAHPoolVfs!({ clearOnInit: false, preserveOnInitFailure: true });
   await result.embedding.close();
   expect(pool.pauseVfs).toHaveBeenCalledTimes(1);
   expect(pool.removeVfs).not.toHaveBeenCalled();
