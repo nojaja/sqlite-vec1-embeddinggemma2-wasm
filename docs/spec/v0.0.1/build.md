@@ -70,18 +70,23 @@
   ├─ ORT Wasm ランタイムの dist/ort への配置
   ├─ 画像コーデック Wasm の dist/image への配置
   └─ Transformers.js パッチ適用およびバンドル (Node / Browser / DirectML)
-[2/5] 公式 SQLite 資材の dist/ へのコピー
+[2/5] 公式 SQLite 資材の dist/ へのコピーおよびローダーパッチ適用
   ├─ sqlite3.wasm (SQLite 3.54.1 + vec1 0.8)
-  └─ 公式ローダー群 (sqlite3-node.mjs, sqlite3-bundler-friendly.mjs 等)
-[3/5] 製品エントリポイントおよびサンプルのバンドル (esbuild)
-  ├─ dist/node/index.{js,mjs} (Node エントリ)
-  ├─ dist/index-browser.mjs (ブラウザエントリ)
-  ├─ dist/workers/inference-node.js (Node 同期ブリッジ Worker)
-  └─ dist/workers/inference-browser.mjs (ブラウザ推論 Worker)
-[4/5] TypeScript 型定義ファイルの生成 (tsc --emitDeclarationOnly)
-  └─ dist/index.d.ts, dist/index-browser.d.ts
-[5/5] ランタイムロック・ビルドレポートの生成
-  └─ dist/runtime-lock.json
+  ├─ 公式ローダー群 (sqlite3-node.mjs, sqlite3-bundler-friendly.mjs 等 7 ファイル)
+  └─ dist/sqlite3-node.mjs への条件付き patches/sqlite-official.patch 適用 ("Array.isArray(text)" 未適用時)
+[3/5] 製品エントリポイントおよびサンプルのバンドル (esbuild 全 10 エントリ)
+  ├─ dist/index.bundle.js (汎用メイン CJS)
+  ├─ dist/node/index.{js,mjs} (Node エントリ CJS/ESM)
+  ├─ dist/index-browser.mjs (ブラウザエントリ ESM)
+  ├─ dist/workers/inference-node.js (Node 同期ブリッジ Worker CJS)
+  ├─ dist/workers/inference-browser.mjs (ブラウザ推論 Worker ESM)
+  └─ dist/samples/node/index.js, dist/samples/browser/{index.mjs,owner.mjs,server.js} (サンプルバンドル)
+[4/5] TypeScript 型定義ファイルの生成
+  ├─ src/official/types.ts を dist/official/types.d.ts へ配置
+  └─ dist/index.d.ts, dist/index.d.mts, dist/index-browser.d.ts の再エクスポート宣言生成
+[5/5] ランタイムロック・ビルドレポート・SBOM の生成
+  ├─ manifests/runtime-lock.json, dist/runtime-lock.json
+  └─ dist/reports/{esbuild-metafile.json,build-content.json,sbom.cdx.json}
 ```
 
 ---
@@ -97,9 +102,9 @@
   - `ort-wasm-simd-threaded.jspi.mjs`
   - `ort-wasm-simd-threaded.jspi.wasm`
 - `@jsquash` より以下の画像コーデック Wasm を `dist/image/` へ配置する：
-  - `jpeg.wasm` (`@jsquash/jpeg`)
-  - `png.wasm` (`@jsquash/png`)
-  - `resize.wasm` (`@jsquash/resize`)
+  - `jpeg.wasm` (`node_modules/@jsquash/jpeg/codec/dec/mozjpeg_dec.wasm`)
+  - `png.wasm` (`node_modules/@jsquash/png/codec/pkg/squoosh_png_bg.wasm`)
+  - `resize.wasm` (`node_modules/@jsquash/resize/lib/resize/pkg/squoosh_resize_bg.wasm`)
 
 ### 4.2 Transformers.js および SQLite 公式資材のパッチ仕様 (`patches/`)
 `node_modules/@huggingface/transformers`（固定バージョン 4.3.1）をステージング作業領域（`.build/staging/transformers-portable` および `.build/staging/transformers-directml`）にコピーし、`git apply --unidiff-zero --ignore-space-change --ignore-whitespace` コマンドにより以下のパッチを適用して各推論バンドルを生成する。すべてのパッチファイル（`patches/*.patch`）は **UTF-8（BOM なし）・LF 改行・ファイル末尾 LF 必須** とする。パッチファイルが存在しない場合や適用に失敗した場合は即座にビルドを中止する。パッチの省略、別版への差し替え、実行時自動フォールバックによる成功扱いは禁止する。
@@ -140,42 +145,51 @@
 
 ### 5.1 エントリポイント構成
 
-| 出力ファイル | フォーマット | ターゲット環境 | 備考 |
-| :--- | :---: | :---: | :--- |
-| `dist/index.bundle.js` | CJS | 汎用メイン | `import.meta.url` ポリフィル注入 |
-| `dist/node/index.js` | CJS | Node.js (require) | `node-file` VFS 初期化、Worker 接続 |
-| `dist/node/index.mjs` | ESM | Node.js (import) | CJS エントリのラッパー |
-| `dist/index-browser.mjs` | ESM | ブラウザ | 専用 Worker / OPFS SAH Pool 連携 |
-| `dist/workers/inference-node.js` | CJS | Node Worker | Atomics 同期ブリッジおよび推論実行 |
-| `dist/workers/inference-browser.mjs`| ESM | ブラウザ Worker | WebGPU adapter 注入および推論実行 |
+| 出力ファイル | 入力ソース | フォーマット | ターゲット環境 | 備考 |
+| :--- | :--- | :---: | :---: | :--- |
+| `dist/index.bundle.js` | `src/official/node.ts` | CJS | 汎用メイン | `import.meta.url` / `import.meta` ポリフィル注入 |
+| `dist/node/index.js` | `src/official/node.ts` | CJS | Node.js (require) | `node-file` VFS 初期化、Worker 接続 |
+| `dist/node/index.mjs` | `src/official/node-esm.ts` | ESM | Node.js (import) | CJS エントリ (`./index.js`) のラッパー |
+| `dist/index-browser.mjs` | `src/official/browser.ts` | ESM | ブラウザ | 専用 Worker / OPFS SAH Pool 連携 |
+| `dist/workers/inference-node.js` | `src/workers/inference-node.ts` | CJS | Node Worker | Atomics 同期ブリッジおよび推論実行 |
+| `dist/workers/inference-browser.mjs`| `src/workers/inference-browser.ts` | ESM | ブラウザ Worker | WebGPU adapter 注入および推論実行 |
+| `dist/samples/node/index.js` | `samples/node/index.ts` | CJS | Node サンプル | `import.meta.url` / `import.meta` ポリフィル注入 |
+| `dist/samples/browser/index.mjs` | `samples/browser/index.ts` | ESM | ブラウザサンプル | supervisor エントリ |
+| `dist/samples/browser/owner.mjs` | `samples/browser/owner.ts` | ESM | ブラウザサンプル | DB owner Worker エントリ |
+| `dist/samples/browser/server.js` | `samples/browser/server.ts` | CJS | Node 配信サーバ | ブラウザサンプル用 COOP/COEP 静的サーバ |
 
 ### 5.2 CJS 出力における `import.meta.url` の解決
-公式 `sqlite3-node.mjs` は内部で `createRequire(import.meta.url)` を使用して Wasm バイナリ等を解決する。
+公式 `sqlite3-node.mjs` は内部で `createRequire(import.meta.url)` 等を使用して Wasm バイナリを解決する。
 esbuild で CJS 形式でバンドルする際、以下の設定を施す：
-- `define: { "import.meta.url": "__svw_import_meta_url" }`
-- `banner: { js: "const __svw_import_meta_url = require('url').pathToFileURL(__filename).href;" }`
-これにより、CJS 環境下でも `import.meta.url` が常に有効な `file:///` URL として動作する。
+- `define: { "import.meta.url": "__svw_import_meta_url", "import.meta": "__svw_import_meta" }`
+- `banner: { js: "const __svw_import_meta_url = require('url').pathToFileURL(__filename).href; const __svw_import_meta = { url: __svw_import_meta_url };" }`
+これにより、CJS 環境下でも `import.meta.url` および `import.meta` が常に有効な `file:///` URL として動作する。
 
 ### 5.3 Wasm ファイル配置と自動検出 (`locateFile`)
 `dist/sqlite3.wasm` はパッケージルートおよび各エントリポイントから参照される。
 `src/official/node.ts` の `locateFile` オプションにより、カレントディレクトリ、`dist/`、またはモジュール相対パスから実在する絶対パスを自動検出して SQLite ランタイムへ渡す。
 
-### 5.4 ランタイムロックとパッチ完全性記録 (`manifests/runtime-lock.json`)
-ビルド工程の最終段階（`[5/5]`）において、`scripts/build/package.ts` は使用した全資材およびパッチファイルの完全性を固定するロックファイル `manifests/runtime-lock.json`（および `dist/runtime-lock.json`）を生成する。
+### 5.4 ランタイムロック・ビルドレポート・SBOM生成 (`manifests/runtime-lock.json`, `dist/reports/`)
+ビルド工程の最終段階（`[5/5]`）において、`scripts/build/package.ts` は使用した全資材およびパッチファイルの完全性を固定するロックファイル `manifests/runtime-lock.json`（および `dist/runtime-lock.json`）を生成し、さらに以下の監査レポートを `dist/reports/` に出力する：
 - 必須記録パッチ（`patches`）:
   - `patches/transformers-portable.patch`: バイト数および SHA-256
   - `patches/transformers-directml.patch`: バイト数および SHA-256
   - `patches/sqlite-official.patch`: バイト数および SHA-256
+- ビルド監査レポート（`dist/reports/`）:
+  - `dist/reports/esbuild-metafile.json`: 全 10 バンドルの esbuild metafile 統合レポート
+  - `dist/reports/build-content.json`: 生成ファイル一覧とサイズ・ハッシュ監査レポート
+  - `dist/reports/sbom.cdx.json`: CycloneDX 1.6 形式の SBOM（`createCycloneDxSbom` により生成）
 - パッチファイルが存在しない、あるいは SHA-256 が一致しない場合はビルドを即座にエラー停止（exit code 1）とする。各環境での決定論的再現性を保証し、未検証パッチやパッチ欠落のまま配布物が生成されることを防ぐ。
 
 ---
 
 ## 6. 型定義ファイルの生成
 
-公式 `@sqlite.org/sqlite-wasm@3.54.1-build1` の型定義（`index.d.mts`）を基盤とし、TypeScript コンパイラおよび型合成スクリプトを用いて型宣言ファイルを生成する。
-- 必須型エクスポート: 公式の `Sqlite3Static`, `Database`, `PreparedStatement`, `CAPI`, `SqlValue`, `BindingSpec`, `sqlite3Worker1Promiser` および製品固有の `ProductSqlite3`, `ProductInitOptions`, `EmbeddingOptions`, `EmbeddingControl`
+公式 `@sqlite.org/sqlite-wasm@3.54.1-build1` の型定義を統合した `src/official/types.ts` を `dist/official/types.d.ts` として配置し、各公開エントリポイント用の再エクスポート型定義ファイルを生成する。
+- 必須型エクスポート: 公式の `Sqlite3Static`, `Database`, `PreparedStatement`, `CAPI`, `WASM_API`, `SqlValue`, `Sqlite3Result`, `ExecOptions`, `BindingSpec`, `OpfsDb`, `sqlite3Worker1Promiser` および製品固有の `ProductSqlite3`, `ProductInitOptions`, `EmbeddingOptions`, `EmbeddingControl`, `Backend`
 - 生成成果物:
-  - `dist/index.d.ts` (Node / メイン公開型定義)
+  - `dist/official/types.d.ts` (`src/official/types.ts` の配置)
+  - `dist/index.d.ts` (`export * from './official/types.js'; export { default } from './official/types.js';`)
   - `dist/index.d.mts` (ESM 向け型定義)
   - `dist/index-browser.d.ts` (ブラウザ公開型定義)
 
@@ -187,8 +201,9 @@ esbuild で CJS 形式でバンドルする際、以下の設定を施す：
 - パッケージ名: `@nojaja/sqlite-vec1-embeddinggemma2-wasm`
 - 公開設定: `"private": false`、`"publishConfig": { "access": "public" }`
 - 同梱ファイル (`files`):
-  - `dist/`: バンドル済み JavaScript、Wasm バイナリ、型定義 (`index.d.ts`, `index.d.mts` 等)
-- `manifests/`: `embeddinggemma2-q4.json`
-- `README.md`: 利用ドキュメント
+  - `dist/`: バンドル済み JavaScript、Wasm バイナリ、型定義 (`index.d.ts`, `index.d.mts` 等)、レポート
+  - `manifests/`: `embeddinggemma2-q4.json`, `runtime-lock.json`
+  - `samples/`: サンプルソース一式
+  - `README.md`: 利用ドキュメント
   - `LICENSE`: ライセンス表示
   - `package.json`: 公式互換エクスポート定義およびメタデータ

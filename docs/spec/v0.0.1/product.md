@@ -14,13 +14,13 @@
 
 | package path | types | 実行入口 / 条件 |
 | --- | --- | --- |
-| `.` | `dist/index.d.ts` (ESM: `dist/index.d.mts`) | `node`: `dist/node/index.js` (CJS) / `dist/node/index.mjs` (ESM)<br>`import`: `dist/index.mjs`<br>`browser`: `dist/index-browser.mjs`<br>`main`: `dist/index.bundle.js` |
-| `./browser` | `dist/index-browser.d.ts` | `dist/index-browser.mjs` |
-| `./node` | `dist/index.d.ts` | import/requireを上と同じく分離 |
+| `.` | `dist/index.d.ts` (ESM: `dist/index.d.mts`) | `browser`: `dist/index-browser.mjs`<br>`node`: `import` → `dist/node/index.mjs`, `require` / `default` → `dist/node/index.js`<br>`default`: `dist/node/index.js`<br>`main`: `dist/index.bundle.js` |
+| `./browser` | `dist/index-browser.d.ts` | `default`: `dist/index-browser.mjs` |
+| `./node` | `dist/index.d.ts` | `import` → `dist/node/index.mjs`, `require` / `default` → `dist/node/index.js` |
 | `./sqlite3.wasm` | なし | `dist/sqlite3.wasm` |
 | `./package.json` | なし | `./package.json` |
 
-公開設定として `"private": false` および `"publishConfig": { "access": "public" }` を定義する。同梱ファイル (`files`) は `dist`, `manifests`, `README.md`, `LICENSE` 等の実在資材に限定し、欠損パスを含めない。
+公開設定として `"private": false` および `"publishConfig": { "access": "public" }` を定義する。同梱ファイル (`files`) は `dist`, `manifests`, `README.md`, `LICENSE`, `samples` の実在資材に限定し、欠損パスを含めない。
 
 条件exportのtypesを先頭にする。root `main` は `./dist/index.bundle.js`、`types` は `./dist/index.d.ts`、Node engineは `>=24 <25`。CommonJS利用時のinitializerは `require(packageName).default`。Node ESM wrapperはCommonJSのdefaultを明示再exportし、CommonJS namespaceをinitializerとして返さない。
 
@@ -88,13 +88,14 @@ vec1 は C の static auto-extension（`sqlite3_wasm_extra_init.c` による `sq
 
 ### 4.1 SQL関数一覧
 
-モデル非依存の汎用関数を提供する。
+モデル非依存の汎用関数および診断用関数を提供する。`embedding` および `embedding_query` は `SQLITE_UTF8 | SQLITE_DIRECTONLY` フラグで登録し、VIEW や TRIGGER 経由の間接実行を拒否する。
 
 | 関数 | 登録arity | 用途 |
 | --- | :--- | :--- |
-| `embedding(text[, model])` | 1、2 | 文書（document）向け埋め込みベクトルの生成 |
-| `embedding_query(text[, model])` | 1、2 | 検索クエリ（query）向け埋め込みベクトルの生成 |
+| `embedding(text[, model])` | 1、2 | 文書（document）向け埋め込みベクトルの生成（`SQLITE_UTF8 \| SQLITE_DIRECTONLY`） |
+| `embedding_query(text[, model])` | 1、2 | 検索クエリ（query）向け埋め込みベクトルの生成（`SQLITE_UTF8 \| SQLITE_DIRECTONLY`） |
 | `DISTANCE(left, right)` | 2 | 2つの Float32 ベクトル間のコサイン距離 (0〜2) |
+| `gemma_model_info()` | 0 | 推論・キャッシュ状態の JSON 文字列返却（推論無効時: `{"ready":false}`、有効時: `{"ready":true,"modelId":"google/embeddinggemma-2","dtype":"q4","dimension":768,"backend":...,"fingerprint":...,"functionCalls":...,"cache":{...}}`） |
 
 ### 4.2 方式A: `VECTOR(dim, 'model')` 型定義と自動モデル判断
 

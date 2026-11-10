@@ -111,7 +111,7 @@ DirectML バンドル生成時は `patches/transformers-directml.patch` を適�
 
 device=dml、executionMode=sequential、enableMemPattern=false、freeDimensionOverrides={s11:1,s35:2520}、graphOptimizationLevelは既定all、logSeverityLevel=4。内部初期化APIはdisabled/basic/extended/allを指定可能。CPUをfallback候補へ足さない。shape/control nodeのORT内部CPU配置と製品fallbackは区別する。
 
-vision graphは元manifest完全性検証後、構造化ONNX protobuf decode/encode（`onnx-proto@8.0.1` の ONNX v1.10.2 `ModelProto` スキーマおよび `protobufjs@7.6.6` を使用。未知フィールドや protobuf wire format の差異によるサイズ不一致を防ぐため独自軽量スキーマは用いない）を使いReshapeのallowzero=1だけを0へ変更する。128箇所、出力159391 bytes、SHA=`e6115d00cb043a16d22376e513898471a911cd97d42832871f92599fd4279fe4`をすべて要求する。他operator/attributeは変えない。永続cache、元graph、fingerprintは書換えない。Wasm/WebGPUに適用しない。
+vision graphは元manifest完全性検証後、構造化ONNX protobuf decode/encode（ワークスペースの `node_modules/onnx-proto`（`downloads/onnx-proto-8.0.1.tgz`）の ONNX v1.10.2 `ModelProto` スキーマおよび `node_modules/protobufjs`（`7.6.6`）を使用。`package.json` の指定バージョンは変更せず、未知フィールドや protobuf wire format の差異によるサイズ不一致を防ぐため独自軽量スキーマは用いない）を使いReshapeのallowzero=1だけを0へ変更する。128箇所、出力159391 bytes、SHA=`e6115d00cb043a16d22376e513898471a911cd97d42832871f92599fd4279fe4`をすべて要求する。他operator/attributeは変えない。永続cache、元graph、fingerprintは書換えない。Wasm/WebGPUに適用しない。
 
 DirectMlModelCache.matchは元VerifiedModelCacheを先に読み、vision graphだけメモリ内patchしResponseを返す。patchInfoはchanged/bytes/sha256だけ。putは常にE_ASSET_INTEGRITY。native graphもbytes+externalDataで供給する。pathへの退避や任意DLL探索をしない。
 

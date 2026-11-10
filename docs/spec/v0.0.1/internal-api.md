@@ -1,8 +1,12 @@
 # v0.0.1 内部インターフェース
 
-## 1. 適用範囲
+## 1. 適用範囲とコード品質規約
 
 各moduleのexport、型、入出力と副作用を以下に定義する。テストが直接importするinterfaceを保持し、外部I/OはJest mockで差し替え可能にする。説明中のBytesはUint8Array、MaybeBytesはUint8Arrayまたはnull、Digestはpath/bytes/sha256、Countersはhit/miss/eviction/actualInference/entries/bytesの略記である。
+
+すべての TypeScript ファイル（`src/`, `tooling/`, `scripts/`, `samples/`）は `eslint.config.js` および `.dependency-cruiser.js` の静的解析規則を厳守する：
+- すべての関数・メソッド・クラス・インターフェース・型エイリアスに日本語 JSDoc コメントを記述し、説明文には `処理名:`・`処理概要:`・`実装理由:` の 3 項目、および引数がある場合は `@param`、戻り値がある場合は `@returns` を必ず含める。
+- 関数ごとの Cognitive Complexity（`sonarjs/cognitive-complexity`）は `10` 以下、`@typescript-eslint/no-explicit-any` エラー `0` 件とする。
 
 ## 2. 入力・推論
 
@@ -96,7 +100,7 @@ StatementExecutionはdatabase/statement/generation/deadline/cancelled/cancellati
 
 InitializationEnvironmentはworker:boolean、runtime=node/browser、platform、architecture、任意nodeMajor。内部検証でnodeMajor省略は24として扱う。ReadyEmbeddingOptionsはbackend/initTimeoutMs/sqlTimeoutMsが必須化されたoptions。
 
-OfficialFactoryは `(options?:Record<string,unknown>)=>Promise<Sqlite3Static>`。OfficialInferenceFactoryはReadyEmbeddingOptionsからsessionを返す。sessionはinfer/identity/information/任意assertReady/async close。registration optionsはidentity/timeoutMs/information/任意check。pool mockはinstallOpfsSAHPoolVfsが返すpauseVfsを観測可能にする。
+OfficialFactoryは `(options?:Record<string,unknown>)=>Promise<Sqlite3Static>`。OfficialInferenceFactoryはReadyEmbeddingOptionsからsessionを返す。sessionはinfer/identity/information/任意assertReady/async close。`createNodeInferenceSession` および `createBrowserInferenceSession` が構築する `information` は `{ ready: true, modelId: manifest.modelId, dtype: "q4", dimension: 768, backend: options.backend, fingerprint: manifest.fingerprint }` とし、`registerEmbeddingExtension` が登録する `gemma_model_info()`（arity 0、`SQLITE_UTF8`）は推論無効時は `JSON.stringify({ ready: false })`、有効時は `JSON.stringify({ ready: true, ...options?.information, functionCalls, cache: lifecycle.statistics() })` を返す（`embedding` / `embedding_query` は `SQLITE_UTF8 | SQLITE_DIRECTONLY` で登録）。registration optionsはidentity/timeoutMs/information/任意check/models/defaultModel。pool mockはinstallOpfsSAHPoolVfsが返すpauseVfsを観測可能にする。
 
 NodeSqliteFilesメソッドはopen(identifier,filenameまたはnull,{create,readonly,main,removeOnClose})、read(identifier,output,offset):number、write(identifier,input,offset):void、sync、truncate(identifier,size)、size(identifier):number、accessible(filename,writable):boolean、delete(filename,synchronize)、close(identifier)、dispose()。readはゼロ埋めした実byte数、未登録identifierはE_STORAGE。ファイルをcloseした後は再open可能で、重複ownerはE_DATABASE_LOCKED。
 
@@ -212,10 +216,12 @@ PackageAuditReportはrequiredFiles、files:{path,bytes}[]、forbiddenFiles、rep
 
 ## 8. Sample/benchmark
 
-`samples/official-scenario.ts` はpopulateOfficialSample(database,stage)、searchOfficialSample(database,query)、mutateOfficialSample(database)をexport。登録は猫/車/犬の3日本語文書と共通1px PNG、id1..4、vec1 flat/cos。検索返値はrowid:string/distance:number。更新はid2の本文/vector、削除はid3の業務/vectorを同transactionで行う。
+`samples/official-scenario.ts` は `Vec1NativeVerification` 型（`{ isNative: boolean; vec1Info: string; vtabVerified: boolean }`）、`OfficialSampleReport` 型、および `populateOfficialSample(database,stage)`、`searchOfficialSample(database,query)`、`mutateOfficialSample(database)` をexport。登録は猫/車/犬の3日本語文書と共通1px PNG、id1..4、vec1 flat/cos。検索返値は `rowid:string` / `distance:number`。更新はid2の本文/vector、削除はid3の業務/vectorを同transactionで行う。
 
-Node sampleは同じfileのmain supervisorとowner Workerを分離。browserはindex.ts supervisor、owner.ts DB、server.ts静的配信。browserには `__SVW_WALKTHROUGH_ONLINE__` と `__SVW_WALKTHROUGH_OFFLINE__` hookがあり、offlineは `runOwnedBrowser("offline")` でfresh ownerを起動する。601000ms監視、未応答E_OUTCOME_UNKNOWN。SAHはclearOnInit:false/preserveOnInitFailure:true、synchronous=FULL、finallyでembedding.close。
+`samples/cli-demo.ts` は E2E テスト（`test/e2e/vector-contract-query.test.ts`）および CLI 動作確認用のスタンドアロンサンプルであり、製品エントリを初期化して `CREATE TABLE documents (id INTEGER PRIMARY KEY, text_data TEXT NOT NULL, embedding VECTOR(768 , 'embeddinggemma-2')) STRICT;`、3行の `INSERT ... VALUES (..., embedding(?))`、および `SELECT id, text_data FROM documents ORDER BY DISTANCE(embedding, embedding_query(?)), id LIMIT 3;` を実行し、標準出力に実行 DDL と `"契約クエリの完全一致実行に成功しました！"` を出力する。
 
-sample reportは4登録、3072B、2 query、先頭id1、finite distance昇順、rollbackVerified=true、更新削除後3行、削除id3不在、quick_check=ok、modelRequestsOnline=11/offline=0を検査可能にする。本文・画像・vector・秘密値はreportしない。`scripts/walkthrough.ts` はEdge channel=msedge、Node/browser reportを保存し、使用tarballをmetadata name/versionで一意選択する。
+Node sample (`samples/node/index.ts`) は同じfileのmain supervisorとowner Workerを分離。browserは `samples/browser/index.ts` supervisor、`samples/browser/owner.ts` DB、`samples/browser/server.ts` 静的配信。browserには `__SVW_WALKTHROUGH_ONLINE__` と `__SVW_WALKTHROUGH_OFFLINE__` hookがあり、offlineは `runOwnedBrowser("offline")` でfresh ownerを起動する。601000ms監視、未応答E_OUTCOME_UNKNOWN。SAHはclearOnInit:false/preserveOnInitFailure:true、synchronous=FULL、finallyでembedding.close。
+
+sample report（`OfficialSampleReport`）は `status: "passed"`、`backend`、`database: "node-file" | "opfs-sahpool"`、`inserted: 4`、`onlineRequests: 11`、`offlineRequests: 0`、`initialResults`（2件、先頭 `rowid: "1"`、finite distance 昇順）、`reopenedResults`、`remainingRows: "3"`（更新削除後3行、削除id3不在）、`quickCheck: "ok"`、`rollbackVerified: true`、`vec1Verification: { isNative: true, vec1Info, vtabVerified: true }` を検査可能にする。本文・画像・vector・秘密値はreportしない。`scripts/walkthrough.ts` はEdge channel=msedge、Node/browser reportを保存し、使用tarballをmetadata name/versionで一意選択する。
 
 benchmarkはcold init/warm-up、SQL cache cold/hit、100行distance走査を分け、query/document/image各30回以上のp50/p95を計測する。process RSSとowner heapを区別し、GPU memoryが取得不能ならnull。高速化率/SLAを捏造しない。
