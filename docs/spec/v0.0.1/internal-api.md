@@ -42,10 +42,12 @@ InferenceInitialization共通は `{cache:object,codecs:ImageCodecBytes,warmupIma
 | `src/workers/db.ts` | requestEmbedding(port,request,cancellationBuffer,timeoutMs):MaybeBytes | 同期結果、NULL短絡、画像copy、送信失敗E_INFERENCE |
 | `src/workers/inference.ts` | handleInferenceRequest(engine,message:unknown,generation:number):Promise<boolean> | 応答publishとfatal bool、stale世代を無視 |
 | `src/workers/inference-browser-controller.ts` | BrowserInferenceController(host,createEngine)、receiveControl(message):void、whenIdle():Promise<void> | 初期化/推論/終了の直列chain、ready/failed/closed、port回収 |
+| `src/workers/inference-browser.ts` | ブラウザ推論専用 Worker エントリ（`dist/workers/inference-browser.mjs` のバンドル入力） | `globalThis.addEventListener("message", ...)` と `BrowserInferenceController` を接続し、`prepareBrowserInference` + `initializeInferenceEngine`（`@huggingface/transformers` バンドル）で実エンジンを生成 |
+| `src/workers/inference-node.ts` | Node 推論専用 Worker エントリ（`dist/workers/inference-node.js` のバンドル入力） | `worker_threads` の `parentPort` で初期化を受け、`prepareNodeModelCache` + `initializeInferenceEngine`（portable Wasm または DirectML バンドル）を起動し `handleInferenceRequest` で同期ブリッジ要求を処理 |
 
-DbEmbeddingRequestはjobId/requestId/generationとquery/documentのbody/title、またはimageのbytes/mime。portはpostMessage(message:unknown):voidだけを必要とする。timeoutは有限>=0、requestId>=1、generation>=0、非空jobIdでなければE_PROTOCOL。NULL本文短絡はenvelope検証後で、画像はUint8Arrayをcopyする。portへ渡すinputはbodyでなくtextという名前を使用する。
+DbEmbeddingRequestはjobId/requestId/generationとquery/documentのbody/title、またはimageのbytes/mime。DB owner 側の `port`（`InferenceRequestPort`）は `postMessage(message:unknown):void` だけを必要とする。timeoutは有限>=0、requestId>=1、generation>=0、非空jobIdでなければE_PROTOCOL。NULL本文短絡はenvelope検証後で、画像はUint8Arrayをcopyする。portへ渡すinputはbodyでなくtextという名前を使用する。
 
-BrowserControllerInitializationはkind=initialize、generation、backend、network、modelBaseUrl、manifest={modelId,repository,revision,artifactSetHash,fingerprint,assets}、inferencePort、任意healthBuffer。hostはpostMessageとclose。createEngineはwarm-up済みengineをasync返却する。generationやmodel manifestをfactoryより先に検証する。
+BrowserControllerInitializationはkind=initialize、generation、backend、network、modelBaseUrl、manifest={modelId,repository,revision,artifactSetHash,fingerprint,assets}、inferencePort、任意healthBuffer。hostはpostMessageとclose。createEngineはwarm-up済みengineをasync返却する。generationやmodel manifestをfactoryより先に検証する。`BrowserInferenceController` の初期化前検証では、`manifest` の `modelId` / `repository` / `revision`、64桁小文字hexの `artifactSetHash` / `fingerprint`、および `Array.isArray(manifest.assets)` を確認し、`manifest.assets.length > 0` のときは `validateModelAssets(manifest.assets)` を実行する（`manifest.assets.length === 0` の単体テスト fixture は controller 単体境界では許容し、実 `createEngine` 内の `prepareBrowserInference` / `PersistentModelCache` で必須11資材を検証する）。また、Worker 側の `inferencePort`（`BrowserInferencePort`）は要求受信（`onmessage`）・開始（`start()`）・終了（`close()`）のみを担い応答は `responseBuffer`（SAB）に書き込むため、初期化検証では `start` および `close` が関数であることのみを確認し、`postMessage` を要求しない。
 
 ## 4. Statementと公式adapter
 
@@ -78,9 +80,10 @@ type EmbeddingInference = (
 | `src/official/functions.ts` | embeddingSqlValue(name,args:readonly unknown[],infer?):MaybeBytes | generic model先行検証、用途・NULL・準備状態 |
 | `src/official/options.ts` | validateEmbeddingOptions(options,environment):ReadyEmbeddingOptionsまたはundefined | 製品仕様の検証順と既定値 |
 | `src/official/initialize.ts` | initializeOfficialRuntime(factory,options={},environment,prepare?):Promise<ProductSqlite3> | embeddingだけ分離して公式option転送、session/拡張終了、pool非破壊解放 |
-| `src/official/registration.ts` | registerEmbeddingExtension(sqlite3,infer?,options?):EmbeddingControl | all-open auto-extension、trace/protection、functionCallsとcache |
+| `src/official/registration.ts` | registerEmbeddingExtension(sqlite3,infer?,options?):EmbeddingControl | all-open auto-extension、trace/protection、functionCallsとcache、動的モデルプロファイル登録 |
+| `src/official/vector-metadata.ts` | parseVectorTypeDeclaration(typeDecl:string):VectorTypeMeta\|null、extractVectorColumnsFromTableInfo(tableName,rows):Map<string,VectorColumnSchema>、resolveModelFromAuthorizer(context):string、calculateCosineDistance(left,right):number\|null、evaluateReferenceModelNetworkPolicy(options):NetworkPolicyResult | `VECTOR(dim[, 'model'])` 型宣言解析、`PRAGMA table_info` からの列メタデータ抽出、Authorizer 通知（`INSERT=18`、`UPDATE=23` および単体テスト互換 `UPDATE=9` かつ `arg1 && arg2` 非空、`FUNCTION=31`）からの優先順位別モデル解決、コサイン距離計算、参照モデル通信方針判定 |
 | `src/official/lifecycle-adapter.ts` | OfficialLifecycleAdapter(sqlite3,lifecycle?,onClose?)、observe(db)、assertClosed()、dispose() | 元capi保持、callback合成、close追跡、元binding復元 |
-| `src/official/metadata.ts` | officialMetadataRecord(identity)、validateOfficialMetadata(actual,identity)、initializeOfficialMetadata(sqlite3,db,identity) | 保存仕様の7項目、DDL、空DB判定 |
+| `src/official/metadata.ts` | officialMetadataRecord(identity)、validateOfficialMetadata(actual,identity)、initializeOfficialMetadata(sqlite3,db,identity) | 保存仕様の7項目（`productVersion: "0.0.3"` 固定）、DDL、空DB判定 |
 | 同上 | OfficialMetadataProtection(sqlite3)、observe(db)、close(db)、dispose() | 内部保護と利用者authorizer合成 |
 | `src/official/node-files.ts` | canonicalNodeSqlitePath(filename):string、NodeSqliteFiles | canonical path、同期I/O、fd/temp/lockの単一所有 |
 | `src/official/node-file-ownership.ts` | NodeFileOwnership(filename)、release():void | kernel IPC排他、同process Worker死亡から復旧 |
@@ -150,6 +153,11 @@ export interface OpfsDirectoryHandle {
 }
 export interface BrowserControllerHost {
   postMessage(message: unknown): void;
+  close(): void;
+}
+export interface BrowserInferencePort {
+  onmessage: ((event: { readonly data?: unknown }) => void) | null;
+  start(): void;
   close(): void;
 }
 export interface InferenceRequestPort { postMessage(message: unknown): void }

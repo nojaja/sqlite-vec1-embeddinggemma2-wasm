@@ -111,7 +111,7 @@ DirectML バンドル生成時は `patches/transformers-directml.patch` を適�
 
 device=dml、executionMode=sequential、enableMemPattern=false、freeDimensionOverrides={s11:1,s35:2520}、graphOptimizationLevelは既定all、logSeverityLevel=4。内部初期化APIはdisabled/basic/extended/allを指定可能。CPUをfallback候補へ足さない。shape/control nodeのORT内部CPU配置と製品fallbackは区別する。
 
-vision graphは元manifest完全性検証後、構造化ONNX protobuf decode/encodeを使いReshapeのallowzero=1だけを0へ変更する。128箇所、出力159391 bytes、SHA=`e6115d00cb043a16d22376e513898471a911cd97d42832871f92599fd4279fe4`をすべて要求する。他operator/attributeは変えない。永続cache、元graph、fingerprintは書換えない。Wasm/WebGPUに適用しない。
+vision graphは元manifest完全性検証後、構造化ONNX protobuf decode/encode（`onnx-proto@8.0.1` の ONNX v1.10.2 `ModelProto` スキーマおよび `protobufjs@7.6.6` を使用。未知フィールドや protobuf wire format の差異によるサイズ不一致を防ぐため独自軽量スキーマは用いない）を使いReshapeのallowzero=1だけを0へ変更する。128箇所、出力159391 bytes、SHA=`e6115d00cb043a16d22376e513898471a911cd97d42832871f92599fd4279fe4`をすべて要求する。他operator/attributeは変えない。永続cache、元graph、fingerprintは書換えない。Wasm/WebGPUに適用しない。
 
 DirectMlModelCache.matchは元VerifiedModelCacheを先に読み、vision graphだけメモリ内patchしResponseを返す。patchInfoはchanged/bytes/sha256だけ。putは常にE_ASSET_INTEGRITY。native graphもbytes+externalDataで供給する。pathへの退避や任意DLL探索をしない。
 
@@ -145,7 +145,7 @@ initializeはartifact set排他内で実行する。
 
 recover()だけが現在setのstageを排他的に削除し、ready=falseへ戻す。他set/DBを消さない。再起動時に未完stageを黙って消さない。
 
-stage/state.jsonを先に書き、11資材を順次stream取得する。各writeはchunkSize以下、宣言byte超過を途中で止め、EOF後の実byte数/hashを検証してwriterをflush/closeする。readerは成功失敗ともcancel/release。全fileが正常になった後にmarkerを書き、各fileをfilesへcommit、markerを最後にcommitし、stageを除去する。途中失敗はwriter.abort、固定E_ASSET_INTEGRITY。部分集合をREADYにしない。
+stage/state.jsonを先に書き、11資材を順次stream取得する。各writeはchunkSize以下、宣言byte超過を途中で止め、EOF後の実byte数/hashを検証してwriterをflush/closeする。readerは成功失敗ともcancel/release。全fileが正常になった後に `stage/ready.json` を書き、既存の公開 `ready.json` が存在する場合（`exists("ready.json") === true`）に限り `removeTree("ready.json")` で先に無効化してから、各fileを `files/` へcommit、最後に `stage/ready.json` を `ready.json` へcommitし、`stage` を除去する（初回コールド取得時は `ready.json` が存在しないため不要な削除を呼ばない）。途中失敗はwriter.abort、固定E_ASSET_INTEGRITY。部分集合をREADYにしない。
 
 read(unknownPath)はundefined。既知pathでも未READYならE_MODEL_CACHE_MISS。READY後も排他内でdigestを再確認し、読んだbyte長を検証してcopy返却する。markerの存在だけを信頼しない。自動LRU削除、Range resume、HTTP retry/backoffは現行cacheにはない。応答失敗は上記固定errorで止め、設計上の将来retryを実装済み契約にしない。
 
@@ -195,4 +195,4 @@ cancel flagは別4-byte SAB。cancel/deadline到達ではPENDINGまたはWRITING
 
 handlerは異generationのsafe integer要求を応答せず無視し、非致命falseを返す。正常結果NULLはprotocol違反。fatal IDは5/6/9/10で、WorkerをFAILEDへ進めengineを解放する。他の入力errorは同sessionの次要求を許す。session healthは4-byte SAB、READY=1、FAILED=2、CLOSED=3。cache hit前にもREADYを確認し、メッセージloopが停止中でも故障を検出する。
 
-browser controllerはinitialize/inference/closeをPromise chainに直列化し、失敗後のqueueもcatchで処理する。二重initialize、未知control、不正manifestは拒否。READYはwarm-up後だけ。close/failureでengineとportを閉じる。session closeの応答待ちは30000ms、そのfinallyでport/Workerを必ず終了する。
+browser controllerはinitialize/inference/closeをPromise chainに直列化し、失敗後のqueueもcatchで処理する。二重initialize、未知control、不正manifestは拒否。controllerの初期化前検証では、`manifest` ヘッダ項目（`modelId === MODEL_ID`、`repository === MODEL_REPOSITORY`、`revision === MODEL_REVISION`、小文字64桁hexの `artifactSetHash` / `fingerprint`、`Array.isArray(manifest.assets)`）を検証し、`manifest.assets.length > 0` の場合は `createEngine` 呼出し前に `validateModelAssets(manifest.assets)` で必須11資材の完全性を検証する。一方、`manifest.assets.length === 0`（`createEngine` をモック注入する単体テスト fixture）の場合は controller 境界では許容し、実ランタイム（`prepareBrowserInference` / `PersistentModelCache`）側で必須11資材の `validateModelAssets` を強制する。また、Worker 側の `inferencePort` は要求の受信（`onmessage`）・開始（`start()`）・終了（`close()`）のみを行い応答は `responseBuffer`（SAB）へ直接書き込むため、`inferencePort` の型検証は `typeof inferencePort.start === "function" && typeof inferencePort.close === "function"` とし、`postMessage` メソッドの存在を必須としない。READYはwarm-up後だけ。close/failureでengineとportを閉じる。session closeの応答待ちは30000ms、そのfinallyでport/Workerを必ず終了する。

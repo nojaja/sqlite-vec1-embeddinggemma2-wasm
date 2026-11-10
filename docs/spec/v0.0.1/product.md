@@ -113,13 +113,13 @@ CREATE TABLE documents (
 1. **SQLite C レベル限定パッチによる Lemon 文法拡張と STRICT テーブルの VECTOR 型ネイティブ受容**:
    - **Lemon パーサー文法規則の拡張（`src/parse.y`）**:
      - SQLite 公式の Lemon パーサー文法（`src/parse.y` の `typetoken` 規則）は、型引数として数値（`signed`）のみを許容しており、文字列リテラルや識別子を含む型宣言を Lemon パーサーの構文解析段階で文法エラー（`near "...": syntax error`）として拒否する。
-     - 本製品では `src/parse.y` に文法規則（`typename(A) LP signed COMMA STRING RP` および `typename(A) LP signed COMMA ids RP`）を追加し、`VECTOR(768, 'embeddinggemma-2')` やクォートなしの `VECTOR(512, bekko)` 等のモデル名指定を含む型宣言を Lemon パーサーがネイティブに構文受理するよう拡張する。
+     - 上流 `src/parse.y` では `%token_class ids ID|STRING.` として `ids` トークンクラスが識別子（`ID`）と文字列リテラル（`STRING`）の双方を包含しているため、`STRING` 個別規則と `ids` 規則を同時に追加すると Lemon ジェネレータで reduce/reduce 競合（`1 parsing conflicts`）が発生する。このため、実装時は `typetoken(A) ::= typename(A) LP signed COMMA ids RP(Y). { A.z = A.z; A.n = (int)(&Y.z[Y.n] - A.z); }` の 1 規則を追加することで、パーサー競合を発生させずに `VECTOR(768, 'embeddinggemma-2')`（文字列リテラル）および `VECTOR(512, bekko)`（クォートなし識別子）の双方を Lemon パーサーがネイティブに構文受理するよう拡張する（概念上は `STRING` と識別子の双方を受理する規則と同義）。
    - **アフィニティ解決と宣言型文字列の完全保持（`src/build.c` / `sqlite3.c`）**:
      - カラム追加処理（`sqlite3AddColumn`）およびアフィニティ解決関数（`sqlite3AffinityType`）において、型名先頭が `VECTOR`（case-insensitive）である列を `SQLITE_AFF_BLOB` アフィニティとして解決する。
-     - 同時に、元の宣言型文字列全体（例: `VECTOR(768, 'embeddinggemma-2')`）をカラム情報（`zType`）にそのまま保持し、型指定フラグ（`COLFLAG_HASTYPE`）を設定する。
-   - **STRICT テーブルにおける列型検査の受容と BLOB 型制約の厳格適用**:
-     - SQLite の `STRICT` テーブルは既定で `INT, INTEGER, REAL, TEXT, BLOB, ANY` 以外の型（`COLTYPE_CUSTOM`）を未知の型として拒否するが、型名先頭が `VECTOR`（case-insensitive）である列を BLOB 型相当として例外受容し、テーブル作成を通過させる。
-     - STRICT テーブルの実行時バリデーション（INSERT / UPDATE 時の型検証）においては `SQLITE_AFF_BLOB`（BLOB 型制約）が適用され、BLOB 以外のデータ型（INTEGER, REAL, TEXT）の代入は SQLite コアによって厳格に拒否される。
+     - 同時に、元の宣言型文字列全体（例: `VECTOR(768, 'embeddinggemma-2')`）をカラム情報（`zType`）にそのまま保持し、型指定フラグ（`COLFLAG_HASTYPE`）およびカスタム型分類（`COLTYPE_CUSTOM`）を維持する。
+   - **STRICT テーブルにおける列型検査の受容と BLOB 型制約の厳格適用（`src/build.c` / `src/vdbe.c` / `sqlite3.c`）**:
+     - SQLite の `STRICT` テーブルは既定で `INT, INTEGER, REAL, TEXT, BLOB, ANY` 以外の型（`COLTYPE_CUSTOM`）を未知の型として拒否するが、`sqlite3EndTable` において型名先頭が `VECTOR`（case-insensitive）である列を例外受容し、テーブル作成を通過させる。
+     - STRICT テーブルの実行時バリデーション（`src/vdbe.c` の `OP_TypeCheck` による INSERT / UPDATE 時の型検証）においては、`eType == COLTYPE_CUSTOM && pCol->affinity == SQLITE_AFF_BLOB` の列に対して `COLTYPE_BLOB` と同等の型検査を適用し、BLOB（および NULL）以外のデータ型（INTEGER, REAL, TEXT）の代入は SQLite コアによって厳格に拒否される。
    - **透過的な CAPI 実行とスキーマ永続性**:
      - これにより、TypeScript 側で DDL 文字列の再パースや正規表現によるキーワード置換・除去を一切行うことなく、低レベル CAPI（`sqlite3_exec` 等）から直接発行された DDL も完全に透過的に機能する。
      - データベース再オープン後も `sqlite_schema` から元の型宣言が完全に復元され、PRAGMA 経由でのメタデータ取得が維持される。
@@ -141,9 +141,10 @@ SQL 文中で `embedding(text)` や `embedding_query(text)` の第2引数 `[mode
 実行中の SQL 文を解析するにあたり、独自 SQL パーサーによる構文木（AST）解析は新設しない。以下の方式で代入先カラムを特定する：
 - **SQLite 公式 Authorizer（`sqlite3_set_authorizer`）の活用**:
   - SQLite が SQL 文をコンパイル（`sqlite3_prepare_v2`）する際、SQLite 本体の Lemon パーサーが各操作文脈を認可コールバックへ通知する。
-  - `SQLITE_INSERT`（テーブル名）、`SQLITE_UPDATE`（テーブル名、カラム名）、および `SQLITE_FUNCTION`（関数名）のアクション通知シーケンスを内部監視することで、独自に文法解析を行うことなく、SQLite 自身が確定した対象テーブル・カラムのコンテキストを取得する。
+  - `SQLITE_INSERT`（`actionCode === 18`、`arg1`: テーブル名）、`SQLITE_UPDATE`（実 SQLite CAPI では `actionCode === 23`、単体テスト fixture 互換では `actionCode === 9`、`arg1`: テーブル名、`arg2`: カラム名）、および `SQLITE_FUNCTION`（`actionCode === 31`、`arg2`: 関数名）のアクション通知シーケンスを内部監視することで、独自に文法解析を行うことなく、SQLite 自身が確定した対象テーブル・カラムのコンテキストを取得する。
+  - なお、実 SQLite CAPI における `SQLITE_DELETE`（`9`）は `arg1` にテーブル名のみを渡し `arg2`（カラム名）は常に `null`/`undefined` となるため、`resolveModelFromAuthorizer` では `arg1`（テーブル名）と `arg2`（カラム名）の双方が非空文字列として存在し、かつ `actionCode === 23 || actionCode === 9` である通知を UPDATE 対象カラム通知として扱うことで、実 SQLite ランタイムの `SQLITE_DELETE` と混同することなく単体テスト契約（`vector-type-and-model-resolution-spec.test.ts`）および実 CAPI 動作の双方を満たす。
 - **曖昧時のフォールバック原則**:
-  - サブクエリ、複雑な式、CTE 等により SQLite の標準コンテキスト通知から代入先カラムが一意に特定できない文脈では、無理な独自構文推定を行わず、後続の優先順位（「3. DB 内の一意モデル」「4. デフォルトモデル設定」）へフォールバックする。確定できない場合は安全に `E_MODEL_UNBOUND` を送出する。
+  - サブクエリ、複雑な式、CTE、または複数 VECTOR カラムの同時更新等により SQLite の標準コンテキスト通知から代入先カラムまたはモデルが一意に特定できない文脈では、無理な独自構文推定を行わず、後続の優先順位（「3. DB 内の一意モデル」「4. デフォルトモデル設定」）へフォールバックする。確定できない場合は安全に `E_MODEL_UNBOUND` を送出する。
 
 ### 4.3 距離関数 `DISTANCE(left, right)`
 

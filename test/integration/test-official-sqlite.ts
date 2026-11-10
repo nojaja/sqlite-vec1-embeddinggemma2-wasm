@@ -14,7 +14,7 @@ async function testOfficialSqlite(): Promise<void> {
   const database = new sqlite3.oo1.DB(":memory:");
   try {
     assert.equal(database.selectValue("SELECT sqlite_version()"), "3.54.1");
-    assert.equal(database.selectValue("SELECT vec1_info()"), "version 0.7 (Scalar, single-threaded)");
+    assert.equal(database.selectValue("SELECT vec1_info()"), "version 0.8 (Scalar, single-threaded)");
     assert.equal(database.selectValue("SELECT count(*) FROM pragma_module_list WHERE name='vec1'"), 1);
     assert.equal(database.selectValue("SELECT embedding(NULL)"), null);
     assert.equal(database.selectValue("SELECT embedding_query(NULL, 'embeddinggemma-2')"), null);

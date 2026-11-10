@@ -10,7 +10,7 @@
 3. **実資材統合試験ゲート (G05)**: 製品モジュール（`src/runtime-assets/model-contract`、`src/sqlite/node-model-cache`）連携のもと `npm run test:assets` を実行し、実モデルのオンライン取得、オフラインキャッシュ、破損拒否・修復、並行取得排他が PASS することを確認する。
 4. **単体テストスイート**: `npm test` により、36 ファイル・208 テストすべてが PASS することを確認する。
 5. **統合テスト・機能ゲート**:
-   - `npm run test:sqlite`: 公式 UDF、未準備短絡、`_svw_meta` 非作成要件、vec1 テーブル動作
+   - `npm run test:sqlite`: 公式 UDF、未準備短絡、`_svw_meta` 非作成要件、vec1 テーブル動作（`vec1_info()` が `"version 0.8 (Scalar, single-threaded)"` を返すこと）
    - `npm run test:storage`: `node-file` VFS CRUD、排他ロック、クラッシュ復旧、メタデータ保護
    - `npm run test:search`: 実モデル検索、キャッシュ増分整合性 (`actualInference`)
    - `npm run test:embedding-cache`: ステートメントキャッシュ分離、100行評価と実推論回数検証
@@ -40,7 +40,7 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
 
 | suite | 主な受入 assertion |
 | :--- | :--- |
-| `browser-worker-controller.test.ts` | READY 前 warm-up、要求直列化、世代不一致、未知 control、失敗/close 後の資源回収、health |
+| `browser-worker-controller.test.ts` | READY 前 warm-up、要求直列化、世代不一致、未知 control、manifest ヘッダ検証（非空 assets 時の `validateModelAssets` と unit fixture 空配列許容）、`inferencePort` の `start`/`close` 検証（`postMessage` 非必須）、失敗/close 後の資源回収、health |
 | `browser-worker-build.test.ts` | browser Worker/entry の Node/native 非到達、DirectML Worker の external native |
 | `browser-opfs-cache-storage.test.ts` | bounded write、atomic copy commit、path 拒否、Web Lock、abort/close |
 | `browser-model.test.ts` | HTTPS/loopback・同 origin、未知 path miss、size/hash、credentials/redirect |
@@ -61,20 +61,20 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
 | `official-browser-assets.test.ts` | document URL 非依存、package 相対 Worker/manifest/model、同 origin と危険 URL 拒否 |
 | `official-functions.test.ts` | model 検証が NULL/READY より先、型/空白/NUL、query/document/title 写像 |
 | `official-initialize.test.ts` | 公式 option 転送、embedding 省略 prepare 0、READY 待機、DB close 前拒否、pool pause だけ |
-| `official-metadata.test.ts` | 7 key 版/空間、一致、backend 非保存、未知 schema/混在拒否 |
+| `official-metadata.test.ts` | 7 key 版/空間（`productVersion: "0.0.3"` 固定、`"0.0.2"` 等の拒否）、一致、backend 非保存、未知 schema/混在拒否 |
 | `official-node-entry.test.ts` | main thread 推論初期化許可（E_ENVIRONMENT 拒否の撤廃）、環境情報引継ぎ |
 | `official-node-files.test.ts` | ownership 競合、short read ゼロ埋め、fsync/write/reopen、symlink 拒否、temporary 回収 |
 | `official-options.test.ts` | 省略、main 許可、matrix、1/1800000 境界、0/NaN/Infinity/unknown 拒否 |
 | `official-public-exports.test.ts` | default initializer、browser named promiser、廃止 API を公開しない |
-| `official-runtime.test.ts` | 実 SQLite transactions/NULL、2 Stmt trace/authorizer、DIRECTONLY、metadata、DISTANCE |
-| `persistent-model-cache.test.ts` | cold stage/ready、offline 通信 0、corrupt online 修復、明示 recover、別 set/DB 保護 |
+| `official-runtime.test.ts` | 実 SQLite transactions/NULL、公式上流準拠の SQL trace 出力（`flags: "ct"` 時の実行 SQL 出力）および `step()` 失敗時 `console.warn`、2 Stmt authorizer、DIRECTONLY、metadata、DISTANCE |
+| `persistent-model-cache.test.ts` | cold stage/ready（初回 `ready.json` 不在時は事前削除なし、既存 `ready.json` 存在時のみ先に削除）、offline 通信 0、corrupt online 修復、明示 recover、別 set/DB 保護 |
 | `profile.test.ts` | 768D LE 独立 BLOB、shape/NaN/zero 拒否、exact prefix/NULL、2048 token、本文/title bytes |
 | `protocol.test.ts` | 通知先行/待機中 publish、state 放棄、公開済保護、cancel/期限、不正 header/size |
 | `release-audit.test.ts` | 全 severity 0 のみ受理、件数不正/不整合/脆弱性を拒否 |
 | `statement-embedding-cache.test.ts` | copy、用途/title/key、10/11 LRU、画像全 bytes、実 32MiB、超過 bypass、NULL/error 非保存 |
 | `statement-lifecycle.test.ts` | ROW 保持/DONE/reset 世代、交互接続/Stmt、close/finalize/error、pause 期限/cancel |
-| `vector-type-and-model-resolution-spec.test.ts` | VECTOR 型 DDL（Lemonパーサー文法拡張・STRICT BLOB型制約・完全宣言保持）解析、[model] 自動解決、動的プロファイル、ゼロダウンロード、推論事前準備・warm-up保証（省略時ゼロオーバーヘッド） |
-| `vector-type-grammar-and-strict.test.ts` | Lemon パーサー文法規則拡張（文字列/識別子引数受理）、STRICT テーブルでの BLOB 型制約（BLOB 以外拒否）、完全宣言文字列保持・再オープン復元、CAPI 透過投入 |
+| `vector-type-and-model-resolution-spec.test.ts` | VECTOR 型 DDL（Lemonパーサー文法拡張・STRICT BLOB型制約・完全宣言保持）解析、[model] 自動解決（Authorizer `INSERT=18`、`UPDATE=23` および unit fixture 互換 `UPDATE=9` かつ `arg1 && arg2` 非空）、動的プロファイル、ゼロダウンロード、推論事前準備・warm-up保証（省略時ゼロオーバーヘッド） |
+| `vector-type-grammar-and-strict.test.ts` | Lemon パーサー文法規則拡張（`ids` トークンクラスによる競合0の文字列/識別子引数受理）、STRICT テーブルでの BLOB 型制約（`OP_TypeCheck` による BLOB 以外拒否）、完全宣言文字列保持・再オープン復元、CAPI 透過投入 |
 | `verified-cache.test.ts` | 2 prefix だけ、未知 key、毎 read size/hash、put は同内容だけ |
 
 ---

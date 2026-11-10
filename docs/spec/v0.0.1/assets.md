@@ -32,7 +32,7 @@
 | `downloads/python-debian/` | Debian 12 (bookworm) official repository | Python 実行環境用 deb 集合（13 deb、詳細は [linux-toolchain.md](linux-toolchain.md)） |
 | `downloads/sqlite-src-3540100.zip` | `https://sqlite.org/2026/sqlite-src-3540100.zip` | SQLite 3.54.1 フルソース（Wasm 再生成用）<br>- サイズ: 14,899,528 バイト<br>- SHA-256: `387e7f6cad4797b17848c07d453dc6606917bb356a6cfe5a3abafd38c240c71b`<br>- 内部に VERSION=3.54.1 および `sqlite-src-3540100/ext/vec1/vec1.c` を同梱 |
 | `downloads/vec1.c` | `downloads/sqlite-src-3540100.zip` 内の `sqlite-src-3540100/ext/vec1/vec1.c` より展開・抽出（標準調達手順）<br>（参照元: SQLite 公式 vec1 Fossil リポジトリ `https://sqlite.org/vec1`。※注意: 単体 URL `https://sqlite.org/vec1/raw/vec1.c` は Bot 防御・Browser Verification により HTML が返却されるため、未検証ダウンロードは不可） | vec1 0.8 C ソース（日付: 2026-02-04、Scalar single-threaded 組み込み用）<br>- サイズ: 378,128 バイト<br>- SHA-256: `a38c62274093bec34631831371ad433703d6dde7fa9ecd6088da4ed33d4a61f9`<br>- 必須マクロ: `#define VEC1_VERSION "0.8"`<br>- 内容検証: HTML 誤検出防止（`<!DOCTYPE`, `<html` 等を含まない C ソースであること） |
-| `downloads/sqlite-official/` | SQLite フルソース + vec1.c より再生成（8 ファイル） | SQLite 3.54.1 + vec1 0.8 組み込み完成ランタイム群：<br>- `sqlite3.wasm`<br>- `sqlite3-node.mjs`<br>- `sqlite3-bundler-friendly.mjs`<br>- `sqlite3.mjs`<br>- `sqlite3-opfs-async-proxy.js`<br>- `sqlite3-worker1.mjs`<br>- `sqlite3-worker1-bundler-friendly.mjs`<br>- `sqlite3-worker1-promiser.mjs` |
+| `downloads/sqlite-official/` | SQLite フルソース + vec1.c より再生成（8 ファイル） | SQLite 3.54.1 + vec1 0.8 組み込み完成ランタイム群（実行時 `vec1_info()` は `"version 0.8 (Scalar, single-threaded)"`）：<br>- `sqlite3.wasm`<br>- `sqlite3-node.mjs`<br>- `sqlite3-bundler-friendly.mjs`<br>- `sqlite3.mjs`<br>- `sqlite3-opfs-async-proxy.js`<br>- `sqlite3-worker1.mjs`<br>- `sqlite3-worker1-bundler-friendly.mjs`<br>- `sqlite3-worker1-promiser.mjs` |
 | `downloads/sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz` | `https://codeload.github.com/sqlite/sqlite-wasm/tar.gz/ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a` | 公式 9 デモ検証用・ビルド済みローダー収録リポジトリアーカイブ<br>- サイズ: 1,221,483 バイト<br>- SHA-256: `8a428f3330278c96073c6afda8d8a51921a18a330000f99645c5d7051409a795` |
 
 ### 2.1 上流パッチ資材 (`patches/`)
@@ -41,9 +41,9 @@
 
 | パッチファイル | 適用対象ライブラリ | 目的・変更内容 | 完全性検証要件 |
 | --- | --- | --- | --- |
-| `patches/transformers-portable.patch` | `@huggingface/transformers@4.3.1`<br>(`src/backends/onnx.js`, `src/utils/model-loader.js`) | 1. `env.backends.onnx = ONNX_ENV;` 直接参照代入によるスレッド数 (`numThreads: 1`) 設定の完全反映と動的 `blob:` URL 抑止（Node.js ESM 環境での `ERR_UNSUPPORTED_ESM_URL_SCHEME` 回避）<br>2. セッション作成・推論直列化キューの例外連鎖分離（先行失敗による後続ブロッキング防止）<br>3. `return_path` 最適化の無効化（Uint8Array メモリバッファ供給） | `manifests/runtime-lock.json` にてファイルサイズおよび SHA-256 を固定・照合 |
-| `patches/transformers-directml.patch` | `@huggingface/transformers@4.3.1`<br>(`src/backends/onnx.js`) | `Symbol.for('onnxruntime')` 注入時にも DirectML デバイス認識を有効化（`supportedDevices.push('dml', 'cpu'); defaultDevices = ['dml'];`）し、GPU テンソル計算を優先実行。CPU への無言のフォールバックを防止 | `manifests/runtime-lock.json` にてファイルサイズおよび SHA-256 を固定・照合 |
-| `patches/sqlite-official.patch` | 公式配布資材<br>(`sqlite3-node.mjs`) | 上流 CAPI 文字列バインドの不具合修正（`Array.isArray(text)` 判定への訂正、`allocCString(text, true)`） | `manifests/runtime-lock.json` にてファイルサイズおよび SHA-256 を固定・照合 |
+| `patches/transformers-portable.patch` | `@huggingface/transformers@4.3.1`<br>(`src/backends/onnx.js`, `src/utils/model-loader.js`, `src/models/session.js`) | 1. `env.backends.onnx = ONNX_ENV;` 直接参照代入によるスレッド数 (`numThreads: 1`) 設定の完全反映と動的 `blob:` URL 抑止（Node.js ESM 環境での `ERR_UNSUPPORTED_ESM_URL_SCHEME` 回避）<br>2. セッション作成・推論直列化キューの例外連鎖分離（先行失敗による後続ブロッキング防止）<br>3. `return_path` 最適化の無効化（Uint8Array メモリバッファ供給）<br>4. セッション例外時の入力テンソル `console.error` 出力抑止 | UTF-8 LF（末尾改行必須）、`manifests/runtime-lock.json` にてファイルサイズおよび SHA-256 を固定・照合 |
+| `patches/transformers-directml.patch` | `@huggingface/transformers@4.3.1`<br>(`src/backends/onnx.js`, `src/models/session.js`) | 1. `Symbol.for('onnxruntime')` 注入時および Node 実行時にも DirectML デバイス認識を有効化（`supportedDevices = ['dml']` / `defaultDevices = ['dml']`）し、GPU テンソル計算を優先実行。CPU への無言のフォールバックを防止<br>2. `env.backends.onnx = ONNX_ENV;` 直接参照結合と直列化キューの例外連鎖分離<br>3. セッション例外時の入力テンソル `console.error` 出力抑止 | UTF-8 LF（末尾改行必須）、`manifests/runtime-lock.json` にてファイルサイズおよび SHA-256 を固定・照合 |
+| `patches/sqlite-official.patch` | 公式配布資材<br>(`sqlite3-node.mjs`) | 上流 CAPI 文字列バインドの不具合修正（`Array.isArray(text)` 判定への訂正、`allocCString(text, true)`） | UTF-8 LF（末尾改行必須）、`manifests/runtime-lock.json` にてファイルサイズおよび SHA-256 を固定・照合 |
 
 ---
 
@@ -81,7 +81,7 @@
    - `sqlite-src-3540100.zip` に同梱されている `sqlite-src-3540100/ext/vec1/vec1.c` から展開・抽出することを標準手順とし、以下の完全性を検証する：
      - バイトサイズ: 378,128 バイト
      - SHA-256: `a38c62274093bec34631831371ad433703d6dde7fa9ecd6088da4ed33d4a61f9`
-     - 必須マクロ: `#define VEC1_VERSION "0.8"` が含まれていること
+     - 必須マクロ: `#define VEC1_VERSION "0.8"` が含まれていること（実行時 `SELECT vec1_info()` も `"version 0.8 (Scalar, single-threaded)"` を返す）
 3. **`downloads/sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz`**:
    - バイトサイズ: 1,221,483 バイト、SHA-256: `8a428f3330278c96073c6afda8d8a51921a18a330000f99645c5d7051409a795`
 
