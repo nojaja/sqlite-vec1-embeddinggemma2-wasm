@@ -153,7 +153,7 @@ read(unknownPath)はundefined。既知pathでも未READYならE_MODEL_CACHE_MISS
 
 Nodeはcanonical rootを保持し、各操作でroot差替えとpath境界を確認する。logical pathはslash区切りの `[A-Za-z0-9._-]+` segmentsで、空・dot/dotdot・backslash・absoluteを拒否。親/最終symlink、非directory parent、非通常fileを拒否。stage writerは排他的作成、partial write loop、fsync/close、abortで所有fileのみ削除。close後write/二重closeは完全性エラー。maxWriteBytes既定1MiB。
 
-Node cache lockはDB所有lockとは別で `.locks/<hash>.lock` directory。既定25ms retry、30000ms deadline。EEXISTだけretryし、期限/別I/O errorはE_ASSET_INTEGRITY。action終了のfinallyで自分のlockを除去する。commitは同一rootのrename。
+Node cache lockはDB所有lockとは別で `.locks/<hash>.lock` directory。同一プロセス内で同一 `lockPath` に対する並行呼び出しはインメモリキュー（`inProcessLocks`）で直列待機し、無駄なファイルシステムポーリングを抑止する。ファイルシステムロックの既定は25ms retry（`lockRetryMs`）、120000ms（120秒）deadline（`lockTimeoutMs`：大容量モデル 315MB の初回ステージング・ハッシュ検証・同期コミットに対応）。Windows NTFS における `STATUS_DELETE_PENDING` 過渡状態対策として `EEXIST` に加え `EPERM` および `EACCES` も再試行対象とし、期限超過またはその他の別 I/O error は `E_ASSET_INTEGRITY`。action終了のfinallyで自分のlockを除去する。commitは同一rootのrename。
 
 browserはOPFS handleをsegmentで辿り、Web Lock `svw-model-cache:<hash>` で排他する。createWritableのatomic closeを使い、commitはsourceのファイルスナップショットをbounded copyしtarget close後にsourceを削除。非標準moveに依存しない。NotFoundErrorだけを不存在として扱う。digestは同時に巨大fileを複数materializeせず、1ファイルスナップショットずつWeb Cryptoで計算する。
 

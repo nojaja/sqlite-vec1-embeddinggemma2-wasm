@@ -120,7 +120,7 @@ NodeSqliteFilesメソッドはopen(identifier,filenameまたはnull,{create,read
 
 PersistentModelCacheOptionsはassets/artifactSetHash/manifestHash/storageと任意fetcher/chunkSize。ArtifactWriterはasync write(chunk)、close、abort。PersistentCacheStorageはasync exists(path):boolean、read(path):Bytes/undefined、digest(path):{bytes,sha256}/undefined、createWriter(path)、commit(source,target)、removeTree(prefix)、runExclusive<T>(key,async action):Promise<T>。Node/browser storageともこの署名を実装する。
 
-Node storage optionはmaxWriteBytes/lockRetryMs/lockTimeoutMs、browser optionはmaxWriteBytes。全て指定時は正のsafe integer。OPFS mockはdirectory.getDirectoryHandle/getFileHandle/removeEntry、file.getFile/createWritable、OpfsFileSnapshotのsize/arrayBuffer/stream、writable.write/close/abort、locks.request(name,action)を提供できる。
+Node storage optionはmaxWriteBytes（既定1MiB）、lockRetryMs（既定25ms）、lockTimeoutMs（既定120000ms：120秒）、browser optionはmaxWriteBytes。全て指定時は正のsafe integer。OPFS mockはdirectory.getDirectoryHandle/getFileHandle/removeEntry、file.getFile/createWritable、OpfsFileSnapshotのsize/arrayBuffer/stream、writable.write/close/abort、locks.request(name,action)を提供できる。
 
 NodeModelCacheOptionsはcacheDirectory/network/baseUrl/assets/artifactSetHash/manifestHash。allowはonline、offlineはoffline初期化。browser fetch署名は(input:string,init:RequestInit)=>Promise<Response>。Node/browserのURL・copy・完全性・stage/ready動作は推論仕様第5節と一致させる。
 
