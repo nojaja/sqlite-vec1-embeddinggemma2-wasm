@@ -2,7 +2,7 @@
 
 ## 1. ビルド概要
 
-本プロジェクトのビルドは、以下の 2 段階で構成される（ビルド前に `node scripts/download-assets.mjs` および `npm run lock-assets` により入力資材および `manifests/embeddinggemma2-q4.json` が完全に検証・固定されていること）：
+本プロジェクトのビルドは、以下の 2 段階で構成される（ビルド前に `node scripts/download-assets.mjs` および `npm run lock-assets` により入力資材、Debian ホスト deb 集合（77 deb + 13 deb）、推論モデル 11 資材、および `manifests/embeddinggemma2-q4.json` が完全に検証・固定されていること。なお、`node scripts/download-assets.mjs` をクリーン状態で先に単体実行した場合でも、`manifests/embeddinggemma2-q4.json` が未存在であれば内部で自動的に `scripts/assets/lock-model.ts` を子プロセス実行して正準マニフェストを生成してからモデル 11 資材の取得・SHA-256 検証を行う）：
 1. **上流資材再生成**: SQLite 3.54.1 フルソース（`sqlite-src-3540100.zip`）および `vec1.c`（version 0.8）を入力とし、Emscripten SDK（`emscripten/emsdk:6.0.8`）環境を用いて C 言語レベルで静的組み込み（static auto-extension）した公式互換 Wasm モジュール群（8 ファイル）を生成する。
 2. **製品パッケージビルド**: 生成された SQLite 資材、ONNX Runtime、および Transformers.js を入力とし、TypeScript/esbuild を用いて高信頼な Node.js / ブラウザ向け配布パッケージを決定論的に生成する。
 
@@ -21,26 +21,27 @@
 
 ### 2.1 入力資材と環境
 - **ビルドコンテナ環境**: `emscripten/emsdk:6.0.8`（Linux x64、詳細は [linux-toolchain.md](linux-toolchain.md)）
+- **ホストツールチェーン deb 集合**: `downloads/sqlite-official-host/*.deb`（77 deb）および `downloads/python-debian/*.deb`（13 deb）。一時ビルド領域 `${HOST_ROOT}` へ `ar x` + `tar` で展開する（コンテナ基盤の glibc を保護するため `libc6_*.deb` 本体はスキップし、`libc6-dev_*.deb` 等のヘッダ・ライブラリを展開する）。**注意**: `emcc`（`clang -target wasm32-unknown-emscripten`）がホスト x86_64 glibc ヘッダ（`gnu/stubs.h` → `'gnu/stubs-32.h' file not found`）を読んで失敗するのを防ぐため、グローバル環境変数 `C_INCLUDE_PATH`、`CPLUS_INCLUDE_PATH`、`LIBRARY_PATH` は必ず `unset` し、ホスト用 `-B` / `-isystem` / `-L` フラグは `${WRAP_BIN}/gcc`（および `cc` シンボリックリンク）ラッパースクリプト内にのみ閉じ込める（[linux-toolchain.md](linux-toolchain.md) 第4項参照）。
 - **SQLite フルソース**: `downloads/sqlite-src-3540100.zip`（VERSION=3.54.1、configure、ext/wasm/GNUmakefile を含む。サイズ: 14,899,528 バイト、SHA-256: `387e7f6cad4797b17848c07d453dc6606917bb356a6cfe5a3abafd38c240c71b`）
 - **vec1 C ソース**: `downloads/vec1.c`（`sqlite-src-3540100.zip` の `sqlite-src-3540100/ext/vec1/vec1.c` から展開・抽出、または公式 vec1 0.8 C ソース。version 0.8 Scalar single-threaded。サイズ: 378,128 バイト、SHA-256: `a38c62274093bec34631831371ad433703d6dde7fa9ecd6088da4ed33d4a61f9`、`#define VEC1_VERSION "0.8"`。単体 URL 取得時の Browser Verification による HTML 誤取得・誤配置を防止する完全性検証必須）
 
 ### 2.2 ソース構成およびフック
 - `ext/wasm/vec1.c` としてソースを配置し、マクロ `#define VEC1_VERSION "0.8"`, `#define VEC1_STATIC 1`, `#define VEC1_THREADS 0` を設定（`scripts/download-assets.mjs` の入力検証および統合テスト `test/integration/test-official-sqlite.ts` が要求する実行時 `SELECT vec1_info()` の返却値 `"version 0.8 (Scalar, single-threaded)"` と一致させる）。
-- 単一スレッドビルド（`#define VEC1_THREADS 0`）時、上流 `vec1.c` の `vec1KMeansInitOne` 関数内で `#if VEC1_THREADS` ガード外から `pQueue->nWorker` を参照して発生するコンパイルエラー（`no member named 'nWorker' in 'struct Vec1TaskQueue'`）を解消するため、作業コピー `ext/wasm/vec1.c` の `vec1KMeansInitOne` 内における `pQueue->nWorker` 参照を単一スレッド定数 `1` に置換する。
+- 単一スレッドビルド（`#define VEC1_THREADS 0`）時、上流 `vec1.c` の `vec1KMeansInitOne` 関数内で `#if VEC1_THREADS` ガード外から不完全型 `Vec1JobQueue`（または `Vec1TaskQueue`）の `pQueue->nWorker` を参照して発生するコンパイルエラーを解消するため、作業コピー `ext/wasm/vec1.c` の `vec1KMeansInitOne` 内における `const int nJob = (pQueue ? pQueue->nWorker + 1 : 1);` を `const int nJob = 1; (void)pQueue;` に置換する。
 - `ext/wasm/sqlite3_wasm_extra_init.c` を作成し、`sqlite3_auto_extension((void(*)(void))sqlite3_extension_init)` により公式 vec1 の初期化関数を全 DB 接続へ自動登録。
 
 ### 2.3 C レベル限定互換変更
-1. **vec1 savepoint 再入保護**: `vec1Savepoint`、`vec1Release`、`vec1RollbackTo` の対象関数スコープ内に限定して、`Vec1Writer *pWriter = pTab->pWriter` を退避し、NULL なら `SQLITE_OK`、`pTab->pWriter = 0` を `vec1WriterFinish(pWriter, ...)` より先に行う（`vec1Update` 等の他関数内の `vec1WriterFinish` 呼び出しを誤置換しないこと）。
+1. **vec1 savepoint 再入保護 (`ext/wasm/vec1.c`)**: `vec1SyncMethod`、`vec1RollbackMethod`、`vec1SavepointMethod`、`vec1ReleaseMethod`、`vec1RollbackToMethod` が共通で呼び出す `vec1FinishWriter(Vec1Tab *pTab, int bDiscard)` 関数に限定して、`Vec1Writer *pWriter = pTab->pWriter;` を退避し、`if( pWriter==0 ) return SQLITE_OK;` で早期リターンした上で、`pTab->pWriter = 0;` を `vec1WriterFinish(pWriter, ...)` より先に行う（全域置換や `vec1Update` 等の他関数内の `vec1WriterFinish` 呼び出しを誤置換しないこと）。
 2. **C 言語版 DISTANCE 関数**: 2つの同一バイト長（`dim * 4` バイト。256, 512, 768 次元など各モデルの次元数に対応）の有限 Float32 BLOB を受け取り、倍精度 L2 ノルム正規化を行った上で `vec1CosDist` へ委譲するスカラー関数 `DISTANCE(left, right)` を静的登録（いずれかが NULL の場合は NULL、不適合時は `E_INPUT`）。
-3. **JS capi sqlite3_bind_text**: Array 判定・連結の誤変数 `pMem` を `text` へ訂正し、文字列 allocation は `allocCString(text, true)` でポインタと長さを取得。
+3. **JS capi sqlite3_bind_text (`ext/wasm/api/sqlite3-api-glue.c-pp.js`)**: `sqlite3_bind_text` 内の Array 判定・連結の誤変数 `else if(Array.isArray(pMem)){ text = pMem.join(''); }` を `else if(Array.isArray(text)){ text = text.join(''); }` へ訂正し（`sqlite3_bind_blob` 側の `Array.isArray(pMem)` は変更しない）、文字列 allocation は `[p, n] = wasm.allocCString(text, true);`（および `[p, n] = wasm.allocCString(pMem, true);`）でポインタとバイト長を取得。
 4. **oo1 built-in trace / step 警告（公式上流実装の維持）**:
    - `oo1` の built-in trace（`__dbTraceToConsole`：Flags `"ct"` 時の `console.log("SQL TRACE #"+(++this.counter), 'via sqlite3@'+c+'['+capi.sqlite3_db_filename(c,null)+']', wasm.cstrToJs(x));`）および `Stmt.step()` 失敗時警告（`sqlite3.config.warn("sqlite3_step() rc=", rc, capi.sqlite3_js_rc_str(rc), "SQL =", capi.sqlite3_sql(this.pointer));`）は、上流 `@sqlite.org/sqlite-wasm`（`ext/wasm/api/sqlite3-api-oo1.c-pp.js`）の公式実装をそのまま維持する。
    - 旧仕様の `SQLITE_TRACE_EVENT` / `SQLITE_STEP_FAILED` への独自置換は行わない（`test/unit/official-runtime.test.ts` が `flags: "ct"` 時の `console.log` に実行 SQL が出力されること、および `step()` 失敗時に `console.warn` が呼び出されることを検証するため。既存の `downloads/sqlite-official/*.mjs` に旧置換が含まれている場合は上流公式実装へ復元する）。
 5. **OPFS void 参照**: 上流の未使用 local/catch/flags/lock を void 参照で安全に処理。
 6. **STRICT テーブルにおける VECTOR 型ネイティブ受容とパーサー文法拡張**:
    - **Lemon パーサー文法規則拡張 (`src/parse.y`)**: 上流 SQLite Lemon パーサーは型宣言の引数として数値（`signed`）しか受理しないため、第2引数にモデル名文字列や識別子を含む宣言（例: `VECTOR(768, 'embeddinggemma-2')`）が文法エラーとなる。なお、上流 `src/parse.y` では `%token_class ids ID|STRING.` として `ids` が識別子と文字列リテラルの双方を包含しているため、`STRING` 個別規則と `ids` 規則を同時に追加すると Lemon ジェネレータで reduce/reduce 競合（`1 parsing conflicts`）が発生する。これを回避するため、`src/parse.y` の `typetoken` 規則には `typetoken(A) ::= typename(A) LP signed COMMA ids RP(Y). { A.z = A.z; A.n = (int)(&Y.z[Y.n] - A.z); }` の 1 規則を追加し、競合 0 件で文字列リテラル・識別子の双方を受理する `parse.c` / `parse.h` を生成する。
-   - **カラム型登録とアフィニティ解決 (`src/build.c` / `sqlite3.c`)**: `sqlite3AddColumn` および `sqlite3AffinityType` において、型名先頭が `VECTOR`（case-insensitive）の列を `SQLITE_AFF_BLOB` アフィニティとして解決し、完全な型宣言文字列（例: `VECTOR(768, 'embeddinggemma-2')`）を `zType` に保持（`COLFLAG_HASTYPE` および `COLTYPE_CUSTOM` を維持し `PRAGMA table_info` が `"BLOB"` へ上書きされるのを防ぐ）。
-   - **STRICT 列型検証の受容と BLOB 型制約 (`src/build.c` / `src/vdbe.c` / `sqlite3.c`)**: `sqlite3EndTable` の `TF_Strict` 検証において、型名先頭が `VECTOR`（case-insensitive）である列を未知の型エラーとせず受容。実行時は `src/vdbe.c` の `OP_TypeCheck` において `eType == COLTYPE_CUSTOM && pCol->affinity == SQLITE_AFF_BLOB` の列に `COLTYPE_BLOB` と同等の型検査を適用し、BLOB（および NULL）以外のデータ型（INTEGER, REAL, TEXT）の代入を拒否する。
+   - **カラム型登録とアフィニティ解決 (`src/build.c` / `sqlite3.c`)**: `sqlite3AffinityType` 先頭において `if( sqlite3_strnicmp(zIn, "VECTOR", 6)==0 && (zIn[6]==0 || zIn[6]=='(' || sqlite3Isspace(zIn[6])) ){ if( pCol ) pCol->szEst = 5; return SQLITE_AFF_BLOB; }` により型名先頭が `VECTOR`（case-insensitive）の列を `SQLITE_AFF_BLOB` アフィニティとして解決し、完全な型宣言文字列（例: `VECTOR(768, 'embeddinggemma-2')`）を `zType` に保持（`COLFLAG_HASTYPE` および `COLTYPE_CUSTOM` を維持し `PRAGMA table_info` が `"BLOB"` へ上書きされるのを防ぐ）。
+   - **STRICT 列型検証の受容と BLOB 型制約 (`src/build.c` / `src/vdbe.c` / `sqlite3.c`)**: `sqlite3EndTable` の `TF_Strict` 検証において、`pCol->eCType==COLTYPE_CUSTOM` のとき `const char *zVecType = sqlite3ColumnType(pCol, "");` が `VECTOR` 先頭（`(pCol->colFlags & COLFLAG_HASTYPE)!=0 && sqlite3_strnicmp(zVecType, "VECTOR", 6)==0 && (zVecType[6]==0 || zVecType[6]=='(' || sqlite3Isspace(zVecType[6]))`）であればエラーとせず `pCol->affinity = SQLITE_AFF_BLOB;` として受容。実行時は `src/vdbe.c` の `OP_TypeCheck` の `default:` 分岐において `if( aCol[i].eCType==COLTYPE_CUSTOM && aCol[i].affinity==SQLITE_AFF_BLOB ){ if( (pIn1->flags & MEM_Blob)==0 ) goto vdbe_type_error; }` を追加し、かつ `vdbe_type_error` ラベルの型名参照を `(aCol[i].eCType>0 ? sqlite3StdType[aCol[i].eCType-1] : "BLOB")` とすることで（`COLTYPE_CUSTOM == 0` による範囲外参照を防止）、BLOB（および NULL）以外のデータ型（INTEGER, REAL, TEXT）の代入を拒否する。
    - これにより、TypeScript 側の DDL 前処理・文字列置換を完全に排除し、低レベル CAPI を含む全実行経路で `VECTOR` 型 DDL のネイティブ受理、`PRAGMA table_info` / `sqlite_schema` での完全宣言文字列保持、および再オープン後の永続性を保証する。
 
 ### 2.4 ビルドコマンドと生成成果物
@@ -112,27 +113,149 @@
 1. **Portable パッチ (`patches/transformers-portable.patch`)**:
    - **適用対象**: `@huggingface/transformers@4.3.1` の `src/backends/onnx.js`, `src/utils/model-loader.js`, `src/models/session.js`
    - **Node.js ESM 動的 URL 回避 & スレッド数設定の完全反映 (`src/backends/onnx.js`)**:
-     - Node portable 経路から `onnxruntime-node` を除去し、Symbol 注入または Web/Node Wasm 環境とも `supportedDevices = ['wasm']; defaultDevices = ['wasm'];` に統一する。
-     - 上流コードの `env.backends.onnx = { ...ONNX_ENV, setLogLevel };` によるオブジェクト浅い複製を排除し、`ONNX_ENV.setLogLevel = setLogLevel; env.backends.onnx = ONNX_ENV;` により直接参照結合を行う。これにより、Node.js 実行環境で外部から注入される `env.backends.onnx.wasm.numThreads = 1` が ONNX Runtime Web 内部へ確実に伝播し、マルチスレッド時に発生する動的 `blob:` URL (`URL.createObjectURL`) によるワーカーインポート（Node ESM ローダーの `ERR_UNSUPPORTED_ESM_URL_SCHEME` 例外）を完全に抑止する。
+     - Node portable 経路から `import ONNX_NODE from './onnx-node.js';`（18行目）および `else if (apis.IS_NODE_ENV) { ... }` ブロック（103〜131行目）を除去し、`if (ORT_SYMBOL in globalThis)` ブロックおよび Web/Node Wasm 環境とも `supportedDevices.push('wasm'); defaultDevices = ['wasm'];` に統一する。
+     - 上流コードの `env.backends.onnx = { ...ONNX_ENV, setLogLevel };`（382〜385行目）によるオブジェクト浅い複製を排除し、`ONNX_ENV.setLogLevel = setLogLevel; env.backends.onnx = ONNX_ENV;` により直接参照結合を行う。これにより、Node.js 実行環境で外部から注入される `env.backends.onnx.wasm.numThreads = 1` が ONNX Runtime Web 内部へ確実に伝播し、マルチスレッド時に発生する動的 `blob:` URL (`URL.createObjectURL`) によるワーカーインポート（Node ESM ローダーの `ERR_UNSUPPORTED_ESM_URL_SCHEME` 例外）を完全に抑止する。
    - **例外連鎖の分離（プロミスチェーンの独立性保護） (`src/backends/onnx.js`)**:
-     - セッション作成キュー (`webInitChain`) および推論実行キュー (`webInferenceChain`) において、`apis.IS_WEB_ENV` 限定条件を外して Node portable 経路でも直列化を有効化し、かつ先行タスクの拒否（rejection）が後続タスクへ連鎖しないよう `const run = webInitChain.then(create, create); webInitChain = run.then(() => undefined, () => undefined); return run;` および `const run = webInferenceChain.then(execute, execute); webInferenceChain = run.then(() => undefined, () => undefined); return run;` へ書き換える。
+     - セッション作成キュー (`webInitChain`、284〜290行目) および推論実行キュー (`webInferenceChain`、309〜310行目) において、`apis.IS_WEB_ENV` 限定条件を外して Node portable 経路でも直列化を有効化し、かつ先行タスクの拒否（rejection）が後続タスクへ連鎖しないよう `const run = webInitChain.then(create, create); webInitChain = run.then(() => undefined, () => undefined); const session = await run;` および `const execute = () => session.run(ortFeed); const run = webInferenceChain.then(execute, execute); webInferenceChain = run.then(() => undefined, () => undefined); return run;` へ書き換える。
    - **メモリバッファ供給の維持（`return_path` 最適化の無効化） (`src/utils/model-loader.js`)**:
-     - `const return_path = apis.IS_NODE_ENV;` を `const return_path = false;` に変更し、常に入力モデル資材を Uint8Array メモリバッファおよび externalData（`{path, data}`）として供給する。
+     - `getCoreModelFile`（48行目: `return await getModelFile(pretrained_model_name_or_path, fullPath, true, options, apis.IS_NODE_ENV);` → `..., false);`）および `getModelDataFiles`（71行目: `const return_path = apis.IS_NODE_ENV;` → `const return_path = false;`）の双方で `return_path` を `false` に変更し、常に入力モデル資材を Uint8Array メモリバッファおよび externalData（`{path, data}`）として供給する。
    - **セッション実行エラー時の入力テンソル出力抑止 (`src/models/session.js`)**:
-     - `console.error(\`An error occurred during model execution: "${e}".\`); console.error('Inputs given to model:', reduced);` の 2 行を削除し、例外発生時に入力データ・テンソル内容が標準エラーへ漏洩しないようにする。
+     - 232〜233行目の `logger.error(\`An error occurred during model execution: "${e}".\`);` および `logger.error('Inputs given to model:', formatted);` の 2 行を削除し、例外発生時に入力データ・テンソル内容がログへ漏洩しないようにする。
+   - **正準 `--unidiff-zero` パッチ定義 (`patches/transformers-portable.patch`)**:
+     ```diff
+     --- a/src/backends/onnx.js
+     +++ b/src/backends/onnx.js
+     @@ -18 +17,0 @@
+     -import ONNX_NODE from './onnx-node.js';
+     @@ -103,29 +102,2 @@
+     -} else if (apis.IS_NODE_ENV) {
+     -    ONNX = ONNX_NODE;
+     -
+     -    // Updated as of ONNX Runtime 1.23.0-dev.20250612-70f14d7670
+     -    // The following table lists the supported versions of ONNX Runtime Node.js binding provided with pre-built binaries.
+     -    // | EPs/Platforms         | Windows x64        | Windows arm64      | Linux x64          | Linux arm64        | MacOS x64          | MacOS arm64        |
+     -    // | --------------------- | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ | ------------------ |
+     -    // | CPU                   | ✔️                  | ✔️                  | ✔️                  | ✔️                  | ✔️                  | ✔️                  |
+     -    // | WebGPU (experimental) | ✔️                  | ✔️                  | ✔️                  | ❌                  | ✔️                  | ✔️                  |
+     -    // | DirectML              | ✔️                  | ✔️                  | ❌                  | ❌                  | ❌                  | ❌                  |
+     -    // | CUDA                  | ❌                  | ❌                  | ✔️ (CUDA v12)       | ❌                  | ❌                  | ❌                  |
+     -    // | CoreML                | ❌                  | ❌                  | ❌                  | ❌                  | ✔️                  | ✔️                  |
+     -    switch (process.platform) {
+     -        case 'win32': // Windows x64 and Windows arm64
+     -            supportedDevices.push('dml');
+     -            break;
+     -        case 'linux': // Linux x64 and Linux arm64
+     -            if (process.arch === 'x64') {
+     -                supportedDevices.push('cuda');
+     -            }
+     -            break;
+     -        case 'darwin': // MacOS x64 and MacOS arm64
+     -            supportedDevices.push('coreml');
+     -            break;
+     -    }
+     -
+     -    supportedDevices.push('webgpu');
+     -    supportedDevices.push('cpu');
+     -    defaultDevices = ['cpu'];
+     +    supportedDevices.push('wasm');
+     +    defaultDevices = ['wasm'];
+     @@ -284 +256 @@
+     -    const load = () =>
+     +    const create = () =>
+     @@ -290 +262,3 @@
+     -    const session = await (apis.IS_WEB_ENV ? (webInitChain = webInitChain.then(load)) : load());
+     +    const run = webInitChain.then(create, create);
+     +    webInitChain = run.then(() => undefined, () => undefined);
+     +    const session = await run;
+     @@ -309,2 +283,4 @@
+     -    const run = () => session.run(ortFeed);
+     -    return apis.IS_WEB_ENV ? (webInferenceChain = webInferenceChain.then(run)) : run();
+     +    const execute = () => session.run(ortFeed);
+     +    const run = webInferenceChain.then(execute, execute);
+     +    webInferenceChain = run.then(() => undefined, () => undefined);
+     +    return run;
+     @@ -382,4 +358,2 @@
+     -    env.backends.onnx = {
+     -        ...ONNX_ENV,
+     -        setLogLevel,
+     -    };
+     +    ONNX_ENV.setLogLevel = setLogLevel;
+     +    env.backends.onnx = ONNX_ENV;
+     --- a/src/utils/model-loader.js
+     +++ b/src/utils/model-loader.js
+     @@ -48 +48 @@
+     -    return await getModelFile(pretrained_model_name_or_path, fullPath, true, options, apis.IS_NODE_ENV);
+     +    return await getModelFile(pretrained_model_name_or_path, fullPath, true, options, false);
+     @@ -71 +71 @@
+     -    const return_path = apis.IS_NODE_ENV;
+     +    const return_path = false;
+     --- a/src/models/session.js
+     +++ b/src/models/session.js
+     @@ -232,2 +231,0 @@
+     -        logger.error(`An error occurred during model execution: "${e}".`);
+     -        logger.error('Inputs given to model:', formatted);
+     ```
 
 2. **DirectML パッチ (`patches/transformers-directml.patch`)**:
-   - **適用対象**: `@huggingface/transformers@4.3.1` の `src/backends/onnx.js`, `src/models/session.js`
-   - **Symbol 注入時の DirectML デバイス認識有効化と優先実行 (`src/backends/onnx.js`)**:
-     - グローバルシンボル `Symbol.for('onnxruntime')` 注入時および Node 環境下のデバイス判定ロジックにおいて、`supportedDevices = ['dml']; defaultDevices = ['dml'];`（または `supportedDevices.push('dml', 'cpu'); defaultDevices = ['dml'];`）を設定し、Windows x64 環境下で DirectML (`dml`) を優先デバイスとして選択させる。CPU への無言のフォールバックを禁止し、DirectML が利用できない環境では環境エラー（`E_ENVIRONMENT`）として厳格に分離する。
+   - **適用対象**: `@huggingface/transformers@4.3.1` の `src/backends/onnx.js`, `src/utils/model-loader.js`, `src/models/session.js`
+   - **Symbol 注入時および Node 実行時の DirectML デバイス認識有効化と優先実行 (`src/backends/onnx.js`)**:
+     - グローバルシンボル `Symbol.for('onnxruntime')` 注入時（102行目直後）に `supportedDevices.push('dml', 'cpu'); defaultDevices = ['dml'];` を追加し、かつ Node 環境下の `defaultDevices`（131行目）も `defaultDevices = ['dml'];` に設定して、Windows x64 環境下で DirectML (`dml`) を優先デバイスとして選択させる。CPU への無言のフォールバックを禁止し、DirectML が利用できない環境では環境エラー（`E_ENVIRONMENT`）として厳格に分離する。
      - `ONNX_ENV.setLogLevel = setLogLevel; env.backends.onnx = ONNX_ENV;` による直接参照結合、および `webInitChain` / `webInferenceChain` の例外連鎖分離（`run.then(() => undefined, () => undefined)`）も同様に適用する。
+   - **メモリバッファ供給の維持（`return_path` 最適化の無効化） (`src/utils/model-loader.js`)**:
+     - `getCoreModelFile`（48行目）および `getModelDataFiles`（71行目）の `return_path` を `false` に変更し、`DirectMlModelCache` から変換済み vision graph および externalData をメモリバッファとして供給する。
    - **セッション実行エラー時の入力テンソル出力抑止 (`src/models/session.js`)**:
-     - Portable パッチと同様に `src/models/session.js` の `console.error` 2 行を削除する。
+     - Portable パッチと同様に `src/models/session.js`（232〜233行目）の `logger.error` 2 行を削除する。
+   - **正準 `--unidiff-zero` パッチ定義 (`patches/transformers-directml.patch`)**:
+     ```diff
+     --- a/src/backends/onnx.js
+     +++ b/src/backends/onnx.js
+     @@ -102,0 +103,2 @@
+     +    supportedDevices.push('dml', 'cpu');
+     +    defaultDevices = ['dml'];
+     @@ -131 +133 @@
+     -    defaultDevices = ['cpu'];
+     +    defaultDevices = ['dml'];
+     @@ -284 +286 @@
+     -    const load = () =>
+     +    const create = () =>
+     @@ -290 +292,3 @@
+     -    const session = await (apis.IS_WEB_ENV ? (webInitChain = webInitChain.then(load)) : load());
+     +    const run = webInitChain.then(create, create);
+     +    webInitChain = run.then(() => undefined, () => undefined);
+     +    const session = await run;
+     @@ -309,2 +313,4 @@
+     -    const run = () => session.run(ortFeed);
+     -    return apis.IS_WEB_ENV ? (webInferenceChain = webInferenceChain.then(run)) : run();
+     +    const execute = () => session.run(ortFeed);
+     +    const run = webInferenceChain.then(execute, execute);
+     +    webInferenceChain = run.then(() => undefined, () => undefined);
+     +    return run;
+     @@ -382,4 +388,2 @@
+     -    env.backends.onnx = {
+     -        ...ONNX_ENV,
+     -        setLogLevel,
+     -    };
+     +    ONNX_ENV.setLogLevel = setLogLevel;
+     +    env.backends.onnx = ONNX_ENV;
+     --- a/src/utils/model-loader.js
+     +++ b/src/utils/model-loader.js
+     @@ -48 +48 @@
+     -    return await getModelFile(pretrained_model_name_or_path, fullPath, true, options, apis.IS_NODE_ENV);
+     +    return await getModelFile(pretrained_model_name_or_path, fullPath, true, options, false);
+     @@ -71 +71 @@
+     -    const return_path = apis.IS_NODE_ENV;
+     +    const return_path = false;
+     --- a/src/models/session.js
+     +++ b/src/models/session.js
+     @@ -232,2 +231,0 @@
+     -        logger.error(`An error occurred during model execution: "${e}".`);
+     -        logger.error('Inputs given to model:', formatted);
+     ```
 
 3. **SQLite 公式ローダーパッチ (`patches/sqlite-official.patch`)**:
-   - **適用対象**: `downloads/sqlite-official/sqlite3-node.mjs`（および同等の公式ローダー JS）
+   - **適用対象**: `downloads/sqlite-official/sqlite3-node.mjs`（再生成時に `ext/wasm/api/sqlite3-api-glue.c-pp.js` へ直接適用済みの場合は `Array.isArray(text)` が含まれるため `git apply` はスキップされ、`manifests/runtime-lock.json` にパッチファイルのサイズ・SHA-256 が記録される）
    - **CAPI `sqlite3_bind_text` の配列判定と UTF-8 文字列長算出の修正**:
-     - `else if(Array.isArray(pMem)) text = text.join("");` の誤変数 `pMem` を `else if(Array.isArray(text)) text = text.join("");` に修正し、`const [pStr, n] = allocCString(text, true);` で確保したバイト長 `n` を `sqlite3_bind_text(pStmt, ndx, pStr, n, ...)` へ渡す変更を記録する。
+     - `else if(Array.isArray(pMem)){ text = pMem.join(''); }` の誤変数 `pMem` を `else if(Array.isArray(text)){ text = text.join(''); }` に修正し、`[p, n] = wasm.allocCString(text, true);` および `[p, n] = wasm.allocCString(pMem, true);` で確保したバイト長 `n` を `sqlite3_bind_text` へ渡す変更を記録する。
 
 ### 4.3 生成される推論バンドル
 - `dist/vendor/transformers-portable-node.js`: Node.js Wasm 向け CJS バンドル（`node:url` pathToFileURL banner 注入、画像 codec は自前 `src/inference/image.ts` へ解決）
@@ -147,13 +270,13 @@
 
 | 出力ファイル | 入力ソース | フォーマット | ターゲット環境 | 備考 |
 | :--- | :--- | :---: | :---: | :--- |
-| `dist/index.bundle.js` | `src/official/node.ts` | CJS | 汎用メイン | `import.meta.url` / `import.meta` ポリフィル注入 |
-| `dist/node/index.js` | `src/official/node.ts` | CJS | Node.js (require) | `node-file` VFS 初期化、Worker 接続 |
-| `dist/node/index.mjs` | `src/official/node-esm.ts` | ESM | Node.js (import) | CJS エントリ (`./index.js`) のラッパー |
-| `dist/index-browser.mjs` | `src/official/browser.ts` | ESM | ブラウザ | 専用 Worker / OPFS SAH Pool 連携 |
-| `dist/workers/inference-node.js` | `src/workers/inference-node.ts` | CJS | Node Worker | Atomics 同期ブリッジおよび推論実行 |
+| `dist/index.bundle.js` | `src/index.ts`（`src/official/node.ts` を再 export） | CJS | 汎用メイン | `import.meta.url` / `import.meta` ポリフィル注入 |
+| `dist/node/index.js` | `src/index.ts`（`src/official/node.ts` を再 export） | CJS | Node.js (require) | `node-file` VFS 初期化、Worker 接続 |
+| `dist/node/index.mjs` | `src/index.ts`（`src/official/node.ts` を再 export） | ESM | Node.js (import) | Node ESM バンドル |
+| `dist/index-browser.mjs` | `src/index-browser.ts`（`src/official/browser.ts` を再 export） | ESM | ブラウザ | 専用 Worker / OPFS SAH Pool 連携 |
+| `dist/workers/inference-node.js` | `src/workers/inference-node.ts` | CJS | Node Worker | Atomics 同期ブリッジおよび推論実行（`onnxruntime-node` external） |
 | `dist/workers/inference-browser.mjs`| `src/workers/inference-browser.ts` | ESM | ブラウザ Worker | WebGPU adapter 注入および推論実行 |
-| `dist/samples/node/index.js` | `samples/node/index.ts` | CJS | Node サンプル | `import.meta.url` / `import.meta` ポリフィル注入 |
+| `dist/samples/node/index.js` | `samples/node/index.ts` | CJS | Node サンプル | `import.meta.url` / `import.meta` ポリフィル注入（`onnxruntime-node` external） |
 | `dist/samples/browser/index.mjs` | `samples/browser/index.ts` | ESM | ブラウザサンプル | supervisor エントリ |
 | `dist/samples/browser/owner.mjs` | `samples/browser/owner.ts` | ESM | ブラウザサンプル | DB owner Worker エントリ |
 | `dist/samples/browser/server.js` | `samples/browser/server.ts` | CJS | Node 配信サーバ | ブラウザサンプル用 COOP/COEP 静的サーバ |
@@ -162,7 +285,7 @@
 公式 `sqlite3-node.mjs` は内部で `createRequire(import.meta.url)` 等を使用して Wasm バイナリを解決する。
 esbuild で CJS 形式でバンドルする際、以下の設定を施す：
 - `define: { "import.meta.url": "__svw_import_meta_url", "import.meta": "__svw_import_meta" }`
-- `banner: { js: "const __svw_import_meta_url = require('url').pathToFileURL(__filename).href; const __svw_import_meta = { url: __svw_import_meta_url };" }`
+- `banner: { js: "const __svw_import_meta_url = require('node:url').pathToFileURL(__filename).href;\nconst __svw_import_meta = { url: __svw_import_meta_url };" }`
 これにより、CJS 環境下でも `import.meta.url` および `import.meta` が常に有効な `file:///` URL として動作する。
 
 ### 5.3 Wasm ファイル配置と自動検出 (`locateFile`)
@@ -189,9 +312,9 @@ esbuild で CJS 形式でバンドルする際、以下の設定を施す：
 - 必須型エクスポート: 公式の `Sqlite3Static`, `Database`, `PreparedStatement`, `CAPI`, `WASM_API`, `SqlValue`, `Sqlite3Result`, `ExecOptions`, `BindingSpec`, `OpfsDb`, `sqlite3Worker1Promiser` および製品固有の `ProductSqlite3`, `ProductInitOptions`, `EmbeddingOptions`, `EmbeddingControl`, `Backend`
 - 生成成果物:
   - `dist/official/types.d.ts` (`src/official/types.ts` の配置)
-  - `dist/index.d.ts` (`export * from './official/types.js'; export { default } from './official/types.js';`)
-  - `dist/index.d.mts` (ESM 向け型定義)
-  - `dist/index-browser.d.ts` (ブラウザ公開型定義)
+  - `dist/index.d.ts` (`import type { ProductInitOptions, ProductSqlite3 } from "./official/types"; export default function initialize(options?: ProductInitOptions): Promise<ProductSqlite3>; export * from "./official/types";`)
+  - `dist/index.d.mts` (`dist/index.d.ts` と同一内容の ESM 向け型定義)
+  - `dist/index-browser.d.ts` (`dist/index.d.ts` と同一内容のブラウザ公開型定義)
 
 ---
 

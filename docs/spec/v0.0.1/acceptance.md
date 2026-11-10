@@ -5,7 +5,7 @@
 本プロジェクトの品質保証は、**「既存のテストコードを変更することなく、すべてのテストが green になること」** を厳格な受入基準とする。
 
 検証は以下の順序で進行する：
-1. **固定資材の配置点検と完全性ロック**: `npm run lock-assets` および `node scripts/download-assets.mjs` により、全 11 モデル資材、正準マニフェスト（`manifests/embeddinggemma2-q4.json`）、公式 SQLite/vec1 ビルド入力資材の存在と完全性を確認・ロックする。
+1. **固定資材の配置点検と完全性ロック**: `node scripts/download-assets.mjs`（`manifests/embeddinggemma2-q4.json` 不在時は内部で `scripts/assets/lock-model.ts` を自動実行）および `npm run lock-assets` により、全 11 モデル資材、正準マニフェスト（`manifests/embeddinggemma2-q4.json`）、公式 SQLite/vec1 ビルド入力資材、および Debian bookworm ツールチェーン `.deb` パッケージ群（77 + 13 個）の存在と完全性を確認・ロックする。
 2. **製品ビルド**: `npm run build` により、推論バンドル・公式 SQLite 資材・製品エントリポイント・型定義が欠落なく生成されることを確認する。
 3. **実資材統合試験ゲート (G05)**: 製品モジュール（`src/runtime-assets/model-contract`、`src/sqlite/node-model-cache`）連携のもと `npm run test:assets` を実行し、実モデルのオンライン取得、オフラインキャッシュ、破損拒否・修復、並行取得排他が PASS することを確認する。
 4. **単体テストスイート**: `npm test` により、36 ファイル・208 テストすべてが PASS することを確認する。
@@ -17,8 +17,8 @@
    - `npm run test:sql-bridge`: `sqlite3_progress_handler` によるタイムアウト (`E_TIMEOUT`)・キャンセル (`E_CANCELLED`)
    - `npm run test:inference:browser`: MS Edge 上での Wasm 実推論 (クエリ/画像)
    - `npm run test:inference:node:directml`: 100回連続クエリ、117,362 DMLノード実行、Wasm 完全パリティ
-5. **E2E 実推論テスト**: `npm run test:e2e` により、実推論（Wasm CPU、DirectML GPU、Edge WebGPU、仕様契約クエリ）の 4 スイートすべてが合格することを確認する。
-6. **アーキテクチャ依存関係監査**: `npm run depcruise` により、モジュール間の境界違反が 0 件であることを確認する。
+6. **E2E 実推論テスト**: `npm run test:e2e` により、実推論（Wasm CPU、DirectML GPU、Edge WebGPU、仕様契約クエリ）の 4 スイートすべてが合格することを確認する。
+7. **アーキテクチャ依存関係監査**: `npm run depcruise` により、モジュール間の境界違反が 0 件であることを確認する。
 
 テストの入力、期待値、異常系、期限と品質閾値を安易に変更して通過させてはならない。
 
