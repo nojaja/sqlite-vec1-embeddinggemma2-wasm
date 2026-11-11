@@ -11,11 +11,12 @@
 ## 2. SQLite 再生成仕様 (`docker/sqlite-runtime-build`)
 
 公式配布のデモアーカイブ単体の Wasm には vec1 拡張が含まれていないため、隔離 Linux x64 コンテナ環境において以下の手順で SQLite 3.54.1 + vec1 0.8 組み込み Wasm を生成する。ビルドコンテナおよびホスト deb 依存関係の詳細要件は [linux-toolchain.md](linux-toolchain.md) を参照すること。
-ホスト環境からは `npm run build:sqlite`（`node scripts/build/sqlite-runtime.ts`）を実行することで、`docker/sqlite-runtime-build` 環境でのコンテナビルド・抽出・完了検証が一貫して自動実行される。
+ホスト環境からは `npm run build:sqlite`（`node scripts/build/sqlite-runtime.ts`）を実行することで、`docker/sqlite-runtime-build` 環境でのコンテナビルド・抽出・完了検証が一貫して自動実行される。公式配布のデモアーカイブ単体の Wasm には vec1 拡張や Lemon 文法拡張（`VECTOR` 型対応等）が含まれていないため、本要件を満たすためには本コンテナビルドによる SQLite Wasm の再生成が必須であり、未再生成の公式資材での代替は不可である。
 
 ### 2.0 再生成環境資材 (`docker/sqlite-runtime-build`)
 - `docker/sqlite-runtime-build/Dockerfile`: `emscripten/emsdk:6.0.8` をベースとするビルドコンテナイメージ
 - `docker/sqlite-runtime-build/build-sqlite.sh`: ホストツール展開、ソースパッチ適用、configure / make、成果物抽出・検証を実行するビルドスクリプト
+- `docker/sqlite-runtime-build/patch_sqlite.py`: Lemon 文法規則拡張、STRICT VECTOR 列型受容、および STRICT 型チェックエラーメッセージ（正確な VECTOR 型名出力）パッチスクリプト
 - `docker/sqlite-runtime-build/sqlite3_wasm_extra_init.c`: vec1 拡張および C 言語版 `DISTANCE` 関数を全 DB 接続へ自動登録する Wasm 初期化フック
 - `docker/sqlite-runtime-build/verify-sqlite.mjs`: 生成資材の `vec1_info()`、`DISTANCE`、768 次元 CRUD、`quick_check` を検証する完了検査スクリプト
 
@@ -41,8 +42,8 @@
 6. **STRICT テーブルにおける VECTOR 型ネイティブ受容とパーサー文法拡張**:
    - **Lemon パーサー文法規則拡張 (`src/parse.y`)**: 上流 SQLite Lemon パーサーは型宣言の引数として数値（`signed`）しか受理しないため、第2引数にモデル名文字列や識別子を含む宣言（例: `VECTOR(768, 'embeddinggemma-2')`）が文法エラーとなる。なお、上流 `src/parse.y` では `%token_class ids ID|STRING.` として `ids` が識別子と文字列リテラルの双方を包含しているため、`STRING` 個別規則と `ids` 規則を同時に追加すると Lemon ジェネレータで reduce/reduce 競合（`1 parsing conflicts`）が発生する。これを回避するため、`src/parse.y` の `typetoken` 規則には `typetoken(A) ::= typename(A) LP signed COMMA ids RP(Y). { A.z = A.z; A.n = (int)(&Y.z[Y.n] - A.z); }` の 1 規則を追加し、競合 0 件で文字列リテラル・識別子の双方を受理する `parse.c` / `parse.h` を生成する。
    - **カラム型登録とアフィニティ解決 (`src/build.c` / `sqlite3.c`)**: `sqlite3AffinityType` 先頭において `if( sqlite3_strnicmp(zIn, "VECTOR", 6)==0 && (zIn[6]==0 || zIn[6]=='(' || sqlite3Isspace(zIn[6])) ){ if( pCol ) pCol->szEst = 5; return SQLITE_AFF_BLOB; }` により型名先頭が `VECTOR`（case-insensitive）の列を `SQLITE_AFF_BLOB` アフィニティとして解決し、完全な型宣言文字列（例: `VECTOR(768, 'embeddinggemma-2')`）を `zType` に保持（`COLFLAG_HASTYPE` および `COLTYPE_CUSTOM` を維持し `PRAGMA table_info` が `"BLOB"` へ上書きされるのを防ぐ）。
-   - **STRICT 列型検証の受容と BLOB 型制約 (`src/build.c` / `src/vdbe.c` / `sqlite3.c`)**: `sqlite3EndTable` の `TF_Strict` 検証において、`pCol->eCType==COLTYPE_CUSTOM` のとき `const char *zVecType = sqlite3ColumnType(pCol, "");` が `VECTOR` 先頭（`(pCol->colFlags & COLFLAG_HASTYPE)!=0 && sqlite3_strnicmp(zVecType, "VECTOR", 6)==0 && (zVecType[6]==0 || zVecType[6]=='(' || sqlite3Isspace(zVecType[6]))`）であればエラーとせず `pCol->affinity = SQLITE_AFF_BLOB;` として受容。実行時は `src/vdbe.c` の `OP_TypeCheck` の `default:` 分岐において `if( aCol[i].eCType==COLTYPE_CUSTOM && aCol[i].affinity==SQLITE_AFF_BLOB ){ if( (pIn1->flags & MEM_Blob)==0 ) goto vdbe_type_error; }` を追加し、かつ `vdbe_type_error` ラベルの型名参照を `(aCol[i].eCType>0 ? sqlite3StdType[aCol[i].eCType-1] : "BLOB")` とすることで（`COLTYPE_CUSTOM == 0` による範囲外参照を防止）、BLOB（および NULL）以外のデータ型（INTEGER, REAL, TEXT）の代入を拒否する。
-   - これにより、TypeScript 側の DDL 前処理・文字列置換を完全に排除し、低レベル CAPI を含む全実行経路で `VECTOR` 型 DDL のネイティブ受理、`PRAGMA table_info` / `sqlite_schema` での完全宣言文字列保持、および再オープン後の永続性を保証する。
+   - **STRICT 列型検証の受容と BLOB 型制約 (`src/build.c` / `src/vdbe.c` / `sqlite3.c`)**: `sqlite3EndTable` の `TF_Strict` 検証において、`pCol->eCType==COLTYPE_CUSTOM` のとき `const char *zVecType = sqlite3ColumnType(pCol, "");` が `VECTOR` 先頭（`(pCol->colFlags & COLFLAG_HASTYPE)!=0 && sqlite3_strnicmp(zVecType, "VECTOR", 6)==0 && (zVecType[6]==0 || zVecType[6]=='(' || sqlite3Isspace(zVecType[6]))`）であればエラーとせず `pCol->affinity = SQLITE_AFF_BLOB;` として受容。実行時は `src/vdbe.c` の `OP_TypeCheck` の `default:` 分岐において `if( aCol[i].eCType==COLTYPE_CUSTOM && aCol[i].affinity==SQLITE_AFF_BLOB ){ if( (pIn1->flags & MEM_Blob)==0 ) goto vdbe_type_error; }` を追加し、かつ `vdbe_type_error` ラベルの型名参照を `(aCol[i].eCType>0 && aCol[i].eCType<=5 ? sqlite3StdType[aCol[i].eCType-1] : "VECTOR")` とすることで（`COLTYPE_CUSTOM == 0` による範囲外参照を防止しつつ、定義型である `VECTOR` を正確に出力）、BLOB（および NULL）以外のデータ型（INTEGER, REAL, TEXT）の代入を拒否する。STRICT 型不一致時のエラーメッセージは、列の宣言型を正確に反映した `cannot store <type> value in VECTOR column <table.column>` として出力する。
+   - これにより、TypeScript 側の DDL 前処理・文字列置換を完全に排除し、低レベル CAPI を含む全実行経路で `VECTOR` 型 DDL のネイティブ受理、`PRAGMA table_info` / `sqlite_schema` での完全宣言文字列保持、STRICT 型チェックでの正確な `VECTOR column` エラーメッセージ出力、および再オープン後の永続性を保証する。
 
 ### 2.4 ビルドコマンドと生成成果物
 - `./configure --disable-readline --disable-tcl`

@@ -50,7 +50,7 @@ license evidenceはid=`apache-2.0`、metadataPath=`README.md`、metadataBytes=28
 
 ## 2. 共通推論初期化
 
-Transformers.js 4.3.1のAutoConfig/AutoProcessor/AutoModelを使う。private runtimeへ検証済みcacheを設定し、`useCustomCache=true`、`useBrowserCache=false`、`useFSCache=false`、`useFS=false`、`allowLocalModels=true`、`allowRemoteModels=false`、`localModelPath="/models/"`、`useWasmCache=false`。env.fetchはcache外通信を必ず `E_ASSET_INTEGRITY` で拒否する。local_files_only=trueと固定revisionを全loaderへ渡す。
+Transformers.js 4.3.1のAutoConfig/AutoProcessor/AutoModelを使う。private runtimeへ検証済みcacheを設定し、`useCustomCache=true`、`useBrowserCache=false`、`useFSCache=false`、`useFS=false`、`allowLocalModels=true`、`allowRemoteModels=false`、`localModelPath="/models/"`、`useWasmCache=false`。ブラウザ推論ワーカー（`src/workers/inference-browser.ts`）および初期化処理（`src/inference/initialize.ts`）においてもこれらを `runtime.env` へ明示的に設定し、ブラウザ環境のデフォルトによるローカルモデル読み込み拒否（`Invalid configuration detected: local models are disabled`）を抑止する。OPFS ルート直下の `.svw-models` ディレクトリを解決して永続キャッシュストレージへ渡す。env.fetchはcache外通信を必ず `E_ASSET_INTEGRITY` で拒否する。local_files_only=trueと固定revisionを全loaderへ渡す。
 
 初期化順はbackend設定、codec、config、audio_config=null、processor、q4 text/vision model、engine attach、query warm-up、image warm-up。vision_configは保持する。feature-extraction pipelineで不要encoderを読む方式にしない。warm-up query本文は `warm up`。共通imageは次の1px PNGで、Node/browserで同じbytesを使う。
 
@@ -105,6 +105,7 @@ rootは `bin/napi-v6/win32/x64/`。
 | `onnxruntime_binding.node` | 358200 | `8d9f996ff7dcc60c4899aa87aa7abe07d806f9c314882f44a001d0fd8a23d16f` |
 
 推論Workerで再検証してrequireし、listSupportedBackendsにname=dmlかつbundled=trueがあることを確認する。private DirectML bundleだけがnative依存をexternalとして参照する。portable Nodeとbrowserは参照しない。製品tarballへnative fileを複製しない。
+Node推論Worker（`src/workers/inference-node.ts`）は、DirectMLバックエンド実行時に `verifyDirectMlInstallation()` を通過後、生 `onnxruntime-node` ではなく DirectML 向けにビルドされた Transformers.js ランタイム（`dist/vendor/transformers-directml-node.js`）を require して使用する。推論初期化処理（`initializeInferenceEngine`）では `runtime.initializeImageCodecs` が関数として存在する場合に限定して画像コーデック初期化を呼び出す安全ガードを設ける。
 DirectML バンドル生成時は `patches/transformers-directml.patch` を適用し、`Symbol.for('onnxruntime')` が注入された状態でも `supportedDevices.push('dml', 'cpu'); defaultDevices = ['dml'];` により DirectML を優先デバイスとして選択させる。DirectML 実行不能時に CPU へ自動切替（フォールバック）して成功扱いにすることは禁止し、即座に `E_ENVIRONMENT` で処理を停止する。各 backend の実推論および Wasm パリティ（コサイン類似度 >= 0.999）を検証する。
 
 ### 4.2 sessionとgraph
@@ -155,7 +156,7 @@ Nodeはcanonical rootを保持し、各操作でroot差替えとpath境界を確
 
 Node cache lockはDB所有lockとは別で `.locks/<hash>.lock` directory。同一プロセス内で同一 `lockPath` に対する並行呼び出しはインメモリキュー（`inProcessLocks`）で直列待機し、無駄なファイルシステムポーリングを抑止する。ファイルシステムロックの既定は25ms retry（`lockRetryMs`）、120000ms（120秒）deadline（`lockTimeoutMs`：大容量モデル 315MB の初回ステージング・ハッシュ検証・同期コミットに対応）。Windows NTFS における `STATUS_DELETE_PENDING` 過渡状態対策として `EEXIST` に加え `EPERM` および `EACCES` も再試行対象とし、期限超過またはその他の別 I/O error は `E_ASSET_INTEGRITY`。action終了のfinallyで自分のlockを除去する。commitは同一rootのrename。
 
-browserはOPFS handleをsegmentで辿り、Web Lock `svw-model-cache:<hash>` で排他する。createWritableのatomic closeを使い、commitはsourceのファイルスナップショットをbounded copyしtarget close後にsourceを削除。非標準moveに依存しない。NotFoundErrorだけを不存在として扱う。digestは同時に巨大fileを複数materializeせず、1ファイルスナップショットずつWeb Cryptoで計算する。
+browserはOPFS handleをsegmentで辿り、Web Lock `svw-model-cache:<hash>` で排他する。createWritableのatomic closeを使い、commitはsourceのファイルスナップショットを `maxWriteBytes`（既定1MiB）以下のチャンクに分割したループ書き込み（bounded chunk write loop）でtargetへコピーし、target close後にsourceを削除する（大容量モデルファイルの一括書き込みによるバッファ超過エラーを防止する）。非標準moveに依存しない。NotFoundErrorだけを不存在として扱う。digestは同時に巨大fileを複数materializeせず、1ファイルスナップショットずつWeb Cryptoで計算する。
 
 ### 5.3 loader cacheと通信
 
