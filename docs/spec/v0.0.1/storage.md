@@ -18,7 +18,7 @@ CREATE TABLE _svw_meta(id INTEGER PRIMARY KEY CHECK(id=1), metadata TEXT NOT NUL
 
 ```json
 {
-  "productVersion": "0.0.1",
+  "productVersion": "0.0.3",
   "modelId": "embeddinggemma-2",
   "revision": "daa72c51243991dfcaf9f9137d2c573d8f7790c0",
   "fingerprint": "5e730f96377d880c7ca94c9ddc9cd5f600e5237e106f5e4dc7d9448140026ac7",
@@ -28,7 +28,7 @@ CREATE TABLE _svw_meta(id INTEGER PRIMARY KEY CHECK(id=1), metadata TEXT NOT NUL
 }
 ```
 
-追加schemaVersionやcreatedAtを要求しない。identityから生成する項目はmodelId、revision、fingerprint、profile。残りはproductVersion、dimension、dtypeの固定値。backendを変えて同一論理空間を再openできる。
+追加schemaVersionやcreatedAtを要求しない。identityから生成する項目はmodelId、revision、fingerprint、profile。残りはproductVersion（`"0.0.3"`：npm パッケージ版 `"0.0.1"` とは独立した保存メタデータ形式契約の固定バージョン識別子）、dimension（`768`）、dtype（`"q4"`）の固定値。`"0.0.3"` 以外の `productVersion`（例: `"0.0.1"`, `"0.0.2"`）は `E_MODEL_MISMATCH` として拒否する。backendを変えて同一論理空間を再openできる。
 
 metadata表がない場合、`sqlite_schema`のうち `name NOT LIKE 'sqlite_%'` の件数0だけを新規空DBとしてbindする。非0はE_MODEL_UNBOUND。BEGIN IMMEDIATE内でDDLとbind付きINSERTを行いCOMMITする。失敗時ROLLBACK。JSONをSQLへ連結しない。
 
@@ -39,6 +39,8 @@ metadata表がない場合、`sqlite_schema`のうち `name NOT LIKE 'sqlite_%'`
 metadata初期bind後にauthorizerを設置する。引数の先頭2つの名前にcase-insensitive `_svw_` prefixが含まれ、actionがSQLITE_READ以外なら拒否する。PRAGMA writable_schemaは読取り指定でも拒否する。業務table・通常transaction・他pragmaを旧ラッパーの禁止一覧で一律遮断しない。
 
 公開sqlite3_set_authorizerは内部保護と利用者callbackを合成する。functionまたはWasm function pointerと引数を保持し、内部拒否を優先、それ以外は利用者の戻り値を尊重する。利用者のcallback解除で保護を解除しない。DB close時に登録pointerを解放し、module終了時は元bindingへ戻す。
+
+タイムアウト（`E_TIMEOUT`）およびキャンセル（`E_CANCELLED`）を100命令周期で監視する内部進捗ハンドラは、`sqlite3.capi.sqlite3_progress_handler` を多重化合成（`compositeProgress`）して提供する。ユーザー定義の進捗ハンドラ登録と独立して管理され、`WrappedDB` コンストラクタ初期化時はフック前のオリジナル関数 `origProgressHandler` を用いて内部監視を直接登録することで、自己再帰（無限再帰によるスタックオーバーフロー）を完全に防止する。
 
 ## 3. Browser保存
 
@@ -54,9 +56,9 @@ HTTPS/信頼されたlocalhost、COOP=same-origin、COEP=require-corp、crossOri
 
 ### 4.1 公開利用
 
-Node initializerは `node-file` VFSを明示登録するが既定VFSを変えない。通常memory constructorと独立する。利用者は `new sqlite3.oo1.DB({filename,vfs:"node-file",flags:"c"})` 等の公式方式で選択する。SQLite本体はWasm、I/OはNode標準fs、SQLite JS StructBinder/VFS helperを使う。native SQLite addon、NODEFS mount、独自journal engineを代用しない。
+Node initializerは `src/official/node-vfs.ts` の `installNodeFileVfs` により `node-file` VFSを明示登録するが既定VFSを変えない。通常memory constructorと独立する。利用者は `new sqlite3.oo1.DB({filename,vfs:"node-file",flags:"c"})` 等の公式方式で選択する。SQLite本体はWasm、I/OはNode標準fs、SQLite JS StructBinder/VFS helperを使う。native SQLite addon、NODEFS mount、独自journal engineを代用しない。
 
-io_methodsはversion1、VFS version1、mxPathname=1024、szOsFileは当該buildのsqlite3_file structから取得。offsetを手書き固定しない。xShm/xFetchによるWAL/mmapは提供しない。標準運用はDELETE/FULL、temp_store=MEMORY、foreign_keys=ON、trusted_schema=OFF、cache_size=-32768。これらを通常全接続へ強制する公開契約にはしない。
+io_methodsはversion1、VFS version1、mxPathname=1024、szOsFileは当該buildのsqlite3_file structから取得。offsetを手書き固定しない。xShm/xFetchによる共有メモリWAL/mmapは提供しないが、DELETEジャーナルモードおよび単一プロセス専任下でのWALモード、`synchronous = FULL` 設定でのトランザクション整合性を保証する。temp_store=MEMORY、foreign_keys=ON、trusted_schema=OFF、cache_size=-32768。これらを通常全接続へ強制する公開契約にはしない。
 
 ### 4.2 pathと所有
 

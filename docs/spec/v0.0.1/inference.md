@@ -2,8 +2,11 @@
 
 ## 1. モデルプロファイルと資材配置戦略
 
-本パッケージは特定モデル（EmbeddingGemma-2）への固定を廃止し、任意の ONNX 埋め込みモデル（EmbeddingGemma-2, ruri-v3, bekko 等）を動的に利用可能なモデルプロファイル機構を採用する。
-また、npm パッケージ内にモデル資材（約300MB）を含めず、外部通信による自動ダウンロードも一切行わない。モデル資材は本ライブラリを利用するアプリケーション側が事前にローカル領域へ配置し、その配置パスを指定して利用する（ゼロダウンロード・完全オフライン動作）。
+本パッケージは、標準サポートされる参照モデル（EmbeddingGemma-2）と、アプリケーション主導で任意の ONNX 埋め込みモデル（ruri-v3, bekko 等）を動的に利用可能なモデルプロファイル機構の双方に対応する。
+また、npm パッケージ配布物（tarball）内には大容量のモデル資材（約300MB）を含めない（ゼロバンドル）。資材の配備およびネットワーク利用は以下の2系統を提供する：
+
+1. **参照モデル（EmbeddingGemma-2）**: 組込みの公式初期化（`initialize({ embedding: ... })`）において、`network: "allow"` での安全なストリーム HTTP 取得による永続キャッシュ構築、または `network: "offline"` での完全ローカルキャッシュ運用（外部通信完全遮断）に対応する。事前配置用ツールとして `scripts/download-assets.mjs` も提供される。
+2. **動的モデルプロファイル（任意ローカルモデル）**: アプリケーション側がローカルに任意モデルを事前配置し、`registerEmbeddingExtension` 経由で推論を統合する（完全オフライン・ゼロダウンロード動作）。
 
 ### 1.1 動的モデルプロファイル (ModelProfileDefinition)
 
@@ -23,7 +26,7 @@ EmbeddingGemma-2 を利用する場合の参照プロファイル：
 
 profileはaudio=false、dtype=q4、dimension=768、preprocessingVersion=`embeddinggemma2-input-v1`、prefixVersion=`embeddinggemma2-prefix-v1`、normalizationVersion=`l2-f64-le-f32-v1`、inputContractVersion=1。image設定は本書第3節。backendは論理fingerprintを変えない。
 
-### 1.1 必須11資材
+### 1.3 必須11資材
 
 pathはmanifest論理path。配置元がflatな場合も論理pathへ対応付ける。assets配列は以下の順で固定し、各行にrole/mime/license=`apache-2.0`を付ける。graph/weightsはoctet-stream、JSONはapplication/json、templateはtext/plain。
 
@@ -47,7 +50,7 @@ license evidenceはid=`apache-2.0`、metadataPath=`README.md`、metadataBytes=28
 
 ## 2. 共通推論初期化
 
-Transformers.js 4.3.1のAutoConfig/AutoProcessor/AutoModelを使う。private runtimeへ検証済みcacheを設定し、`useCustomCache=true`、`useBrowserCache=false`、`useFSCache=false`、`useFS=false`、`allowLocalModels=true`、`allowRemoteModels=false`、`localModelPath="/models/"`、`useWasmCache=false`。env.fetchはcache外通信を必ず `E_ASSET_INTEGRITY` で拒否する。local_files_only=trueと固定revisionを全loaderへ渡す。
+Transformers.js 4.3.1のAutoConfig/AutoProcessor/AutoModelを使う。private runtimeへ検証済みcacheを設定し、`useCustomCache=true`、`useBrowserCache=false`、`useFSCache=false`、`useFS=false`、`allowLocalModels=true`、`allowRemoteModels=false`、`localModelPath="/models/"`、`useWasmCache=false`。ブラウザ推論ワーカー（`src/workers/inference-browser.ts`）および初期化処理（`src/inference/initialize.ts`）においてもこれらを `runtime.env` へ明示的に設定し、ブラウザ環境のデフォルトによるローカルモデル読み込み拒否（`Invalid configuration detected: local models are disabled`）を抑止する。OPFS ルート直下の `.svw-models` ディレクトリを解決して永続キャッシュストレージへ渡す。env.fetchはcache外通信を必ず `E_ASSET_INTEGRITY` で拒否する。local_files_only=trueと固定revisionを全loaderへ渡す。
 
 初期化順はbackend設定、codec、config、audio_config=null、processor、q4 text/vision model、engine attach、query warm-up、image warm-up。vision_configは保持する。feature-extraction pipelineで不要encoderを読む方式にしない。warm-up query本文は `warm up`。共通imageは次の1px PNGで、Node/browserで同じbytesを使う。
 
@@ -65,9 +68,12 @@ engine.attachは一度だけ。closedまたは二重attach、未attachのembed�
 
 ### 2.1 Portable互換処理
 
-Transformers.js (`@huggingface/transformers`) を private staging へ配置し、Node portable経路からonnxruntime-nodeとsharp importを除去する。Node環境自体を偽装せず、device許可とruntime選択だけをwasmへ限定する。session作成/run queueは直列化し、rejectionが次の正常要求へ連鎖しないようにする。`patches/transformers-portable.patch` により、Node.js 環境での動的 `blob:` URL のインポート失敗を防ぐ `numThreads = 1` 参照反映と、直列化プロミスチェーンでの例外連鎖防止、`return_path` 最適化の無効化（Uint8Array メモリバッファ供給）を確実に適用する。
+Transformers.js (`@huggingface/transformers` 4.3.1) を private staging へ配置し、Node portable経路からonnxruntime-nodeとsharp importを除去する。Node環境自体を偽装せず、device許可とruntime選択だけをwasmへ限定する。session作成/run queueは直列化し、rejectionが次の正常要求へ連鎖しないようにする。`patches/transformers-portable.patch` により、以下の 3 点を決定論的に適用・保証する：
+1. **スレッド数同期と動的 URL 抑止**: `env.backends.onnx = ONNX_ENV` の直接参照結合により、Node.js 環境で外部注入された `env.backends.onnx.wasm.numThreads = 1` を内部へ確実に浸透させ、動的 `blob:` URL のインポート（Node ESM ローダーの `ERR_UNSUPPORTED_ESM_URL_SCHEME` 例外）を完全に防ぐ。
+2. **例外連鎖の分離**: セッション作成キュー (`webInitChain`) および推論実行キュー (`webInferenceChain`) において、先行タスクのエラー・rejection が後続の独立した推論タスクへ波及しないようキューの回復性を確保し、Node portable 経路でも同等の直列化・例外分離を行う。
+3. **メモリバッファ供給の強制**: `src/utils/model-loader.js` の `return_path` 最適化を無効化（`return_path = false`）し、core graph を Uint8Array、externalData を `{path, data}` bytes として供給する。
 
-core graphをUint8Array、externalDataを `{path,data}` bytesで供給する。native向けreturn_path最適化をportable経路で無効にする。external data名はgraphの相対名であり、cache絶対pathではない。RawImageを第3節のportable adapterへ置換し、sessionの上流error loggingからtensor/入力を除く。browser bundleへNode builtin/native依存を到達させない。
+external data名はgraphの相対名であり、cache絶対pathではない。RawImageを第3節のportable adapterへ置換し、sessionの上流error loggingからtensor/入力を除く。browser bundleへNode builtin/native依存を到達させない。パッチ未適用のままのビルドや、別版への差し替え、実行時フォールバックによる成功扱いは禁止する。
 
 ## 3. 画像前処理
 
@@ -99,12 +105,14 @@ rootは `bin/napi-v6/win32/x64/`。
 | `onnxruntime_binding.node` | 358200 | `8d9f996ff7dcc60c4899aa87aa7abe07d806f9c314882f44a001d0fd8a23d16f` |
 
 推論Workerで再検証してrequireし、listSupportedBackendsにname=dmlかつbundled=trueがあることを確認する。private DirectML bundleだけがnative依存をexternalとして参照する。portable Nodeとbrowserは参照しない。製品tarballへnative fileを複製しない。
+Node推論Worker（`src/workers/inference-node.ts`）は、DirectMLバックエンド実行時に `verifyDirectMlInstallation()` を通過後、生 `onnxruntime-node` ではなく DirectML 向けにビルドされた Transformers.js ランタイム（`dist/vendor/transformers-directml-node.js`）を require して使用する。推論初期化処理（`initializeInferenceEngine`）では `runtime.initializeImageCodecs` が関数として存在する場合に限定して画像コーデック初期化を呼び出す安全ガードを設ける。
+DirectML バンドル生成時は `patches/transformers-directml.patch` を適用し、`Symbol.for('onnxruntime')` が注入された状態でも `supportedDevices.push('dml', 'cpu'); defaultDevices = ['dml'];` により DirectML を優先デバイスとして選択させる。DirectML 実行不能時に CPU へ自動切替（フォールバック）して成功扱いにすることは禁止し、即座に `E_ENVIRONMENT` で処理を停止する。各 backend の実推論および Wasm パリティ（コサイン類似度 >= 0.999）を検証する。
 
 ### 4.2 sessionとgraph
 
 device=dml、executionMode=sequential、enableMemPattern=false、freeDimensionOverrides={s11:1,s35:2520}、graphOptimizationLevelは既定all、logSeverityLevel=4。内部初期化APIはdisabled/basic/extended/allを指定可能。CPUをfallback候補へ足さない。shape/control nodeのORT内部CPU配置と製品fallbackは区別する。
 
-vision graphは元manifest完全性検証後、構造化ONNX protobuf decode/encodeを使いReshapeのallowzero=1だけを0へ変更する。128箇所、出力159391 bytes、SHA=`e6115d00cb043a16d22376e513898471a911cd97d42832871f92599fd4279fe4`をすべて要求する。他operator/attributeは変えない。永続cache、元graph、fingerprintは書換えない。Wasm/WebGPUに適用しない。
+vision graphは元manifest完全性検証後、構造化ONNX protobuf decode/encode（ワークスペースの `node_modules/onnx-proto`（`downloads/onnx-proto-8.0.1.tgz`）の ONNX v1.10.2 `ModelProto` スキーマおよび `node_modules/protobufjs`（`7.6.6`）を使用。`package.json` の指定バージョンは変更せず、未知フィールドや protobuf wire format の差異によるサイズ不一致を防ぐため独自軽量スキーマは用いない）を使いReshapeのallowzero=1だけを0へ変更する。128箇所、出力159391 bytes、SHA=`e6115d00cb043a16d22376e513898471a911cd97d42832871f92599fd4279fe4`をすべて要求する。他operator/attributeは変えない。永続cache、元graph、fingerprintは書換えない。Wasm/WebGPUに適用しない。
 
 DirectMlModelCache.matchは元VerifiedModelCacheを先に読み、vision graphだけメモリ内patchしResponseを返す。patchInfoはchanged/bytes/sha256だけ。putは常にE_ASSET_INTEGRITY。native graphもbytes+externalDataで供給する。pathへの退避や任意DLL探索をしない。
 
@@ -138,7 +146,7 @@ initializeはartifact set排他内で実行する。
 
 recover()だけが現在setのstageを排他的に削除し、ready=falseへ戻す。他set/DBを消さない。再起動時に未完stageを黙って消さない。
 
-stage/state.jsonを先に書き、11資材を順次stream取得する。各writeはchunkSize以下、宣言byte超過を途中で止め、EOF後の実byte数/hashを検証してwriterをflush/closeする。readerは成功失敗ともcancel/release。全fileが正常になった後にmarkerを書き、各fileをfilesへcommit、markerを最後にcommitし、stageを除去する。途中失敗はwriter.abort、固定E_ASSET_INTEGRITY。部分集合をREADYにしない。
+stage/state.jsonを先に書き、11資材を順次stream取得する。各writeはchunkSize以下、宣言byte超過を途中で止め、EOF後の実byte数/hashを検証してwriterをflush/closeする。readerは成功失敗ともcancel/release。全fileが正常になった後に `stage/ready.json` を書き、既存の公開 `ready.json` が存在する場合（`exists("ready.json") === true`）に限り `removeTree("ready.json")` で先に無効化してから、各fileを `files/` へcommit、最後に `stage/ready.json` を `ready.json` へcommitし、`stage` を除去する（初回コールド取得時は `ready.json` が存在しないため不要な削除を呼ばない）。途中失敗はwriter.abort、固定E_ASSET_INTEGRITY。部分集合をREADYにしない。
 
 read(unknownPath)はundefined。既知pathでも未READYならE_MODEL_CACHE_MISS。READY後も排他内でdigestを再確認し、読んだbyte長を検証してcopy返却する。markerの存在だけを信頼しない。自動LRU削除、Range resume、HTTP retry/backoffは現行cacheにはない。応答失敗は上記固定errorで止め、設計上の将来retryを実装済み契約にしない。
 
@@ -146,9 +154,9 @@ read(unknownPath)はundefined。既知pathでも未READYならE_MODEL_CACHE_MISS
 
 Nodeはcanonical rootを保持し、各操作でroot差替えとpath境界を確認する。logical pathはslash区切りの `[A-Za-z0-9._-]+` segmentsで、空・dot/dotdot・backslash・absoluteを拒否。親/最終symlink、非directory parent、非通常fileを拒否。stage writerは排他的作成、partial write loop、fsync/close、abortで所有fileのみ削除。close後write/二重closeは完全性エラー。maxWriteBytes既定1MiB。
 
-Node cache lockはDB所有lockとは別で `.locks/<hash>.lock` directory。既定25ms retry、30000ms deadline。EEXISTだけretryし、期限/別I/O errorはE_ASSET_INTEGRITY。action終了のfinallyで自分のlockを除去する。commitは同一rootのrename。
+Node cache lockはDB所有lockとは別で `.locks/<hash>.lock` directory。同一プロセス内で同一 `lockPath` に対する並行呼び出しはインメモリキュー（`inProcessLocks`）で直列待機し、無駄なファイルシステムポーリングを抑止する。ファイルシステムロックの既定は25ms retry（`lockRetryMs`）、120000ms（120秒）deadline（`lockTimeoutMs`：大容量モデル 315MB の初回ステージング・ハッシュ検証・同期コミットに対応）。Windows NTFS における `STATUS_DELETE_PENDING` 過渡状態対策として `EEXIST` に加え `EPERM` および `EACCES` も再試行対象とし、期限超過またはその他の別 I/O error は `E_ASSET_INTEGRITY`。action終了のfinallyで自分のlockを除去する。commitは同一rootのrename。
 
-browserはOPFS handleをsegmentで辿り、Web Lock `svw-model-cache:<hash>` で排他する。createWritableのatomic closeを使い、commitはsourceのファイルスナップショットをbounded copyしtarget close後にsourceを削除。非標準moveに依存しない。NotFoundErrorだけを不存在として扱う。digestは同時に巨大fileを複数materializeせず、1ファイルスナップショットずつWeb Cryptoで計算する。
+browserはOPFS handleをsegmentで辿り、Web Lock `svw-model-cache:<hash>` で排他する。createWritableのatomic closeを使い、commitはsourceのファイルスナップショットを `maxWriteBytes`（既定1MiB）以下のチャンクに分割したループ書き込み（bounded chunk write loop）でtargetへコピーし、target close後にsourceを削除する（大容量モデルファイルの一括書き込みによるバッファ超過エラーを防止する）。非標準moveに依存しない。NotFoundErrorだけを不存在として扱う。digestは同時に巨大fileを複数materializeせず、1ファイルスナップショットずつWeb Cryptoで計算する。
 
 ### 5.3 loader cacheと通信
 
@@ -188,4 +196,4 @@ cancel flagは別4-byte SAB。cancel/deadline到達ではPENDINGまたはWRITING
 
 handlerは異generationのsafe integer要求を応答せず無視し、非致命falseを返す。正常結果NULLはprotocol違反。fatal IDは5/6/9/10で、WorkerをFAILEDへ進めengineを解放する。他の入力errorは同sessionの次要求を許す。session healthは4-byte SAB、READY=1、FAILED=2、CLOSED=3。cache hit前にもREADYを確認し、メッセージloopが停止中でも故障を検出する。
 
-browser controllerはinitialize/inference/closeをPromise chainに直列化し、失敗後のqueueもcatchで処理する。二重initialize、未知control、不正manifestは拒否。READYはwarm-up後だけ。close/failureでengineとportを閉じる。session closeの応答待ちは30000ms、そのfinallyでport/Workerを必ず終了する。
+browser controllerはinitialize/inference/closeをPromise chainに直列化し、失敗後のqueueもcatchで処理する。二重initialize、未知control、不正manifestは拒否。controllerの初期化前検証では、`manifest` ヘッダ項目（`modelId === MODEL_ID`、`repository === MODEL_REPOSITORY`、`revision === MODEL_REVISION`、小文字64桁hexの `artifactSetHash` / `fingerprint`、`Array.isArray(manifest.assets)`）を検証し、`manifest.assets.length > 0` の場合は `createEngine` 呼出し前に `validateModelAssets(manifest.assets)` で必須11資材の完全性を検証する。一方、`manifest.assets.length === 0`（`createEngine` をモック注入する単体テスト fixture）の場合は controller 境界では許容し、実ランタイム（`prepareBrowserInference` / `PersistentModelCache`）側で必須11資材の `validateModelAssets` を強制する。また、Worker 側の `inferencePort` は要求の受信（`onmessage`）・開始（`start()`）・終了（`close()`）のみを行い応答は `responseBuffer`（SAB）へ直接書き込むため、`inferencePort` の型検証は `typeof inferencePort.start === "function" && typeof inferencePort.close === "function"` とし、`postMessage` メソッドの存在を必須としない。READYはwarm-up後だけ。close/failureでengineとportを閉じる。session closeの応答待ちは30000ms、そのfinallyでport/Workerを必ず終了する。

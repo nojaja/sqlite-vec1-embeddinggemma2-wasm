@@ -16,7 +16,8 @@
 | --- | --- |
 | 公式 SQLite + vec1 完成モジュール | `sqlite-src-3540100.zip` および `vec1.c`（version 0.8 Scalar single-threaded）を Emscripten SDK（`emscripten/emsdk:6.0.8`）環境にてビルドし、生成された 8 ファイル（`sqlite3.wasm`, `sqlite3-node.mjs`, `sqlite3-bundler-friendly.mjs` 等）を `downloads/sqlite-official/` 配下へ配置する（Linux 再生成環境およびホスト依存は [linux-toolchain.md](linux-toolchain.md) 参照）。 |
 | 互換検証用 archive | 公式 demo リポジトリアーカイブ（`sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz`）を取得し、公式デモとの互換性を検証する。 |
-| manifests/embeddinggemma2-q4.json | モデルの 11 資材の完全性（ファイルサイズおよび SHA-256）を定義し、推論初期化時に検証する。 |
+| 上流修正パッチ資材 (`patches/`) | Transformers.js 4.3.1 および SQLite 公式資材に対する限定パッチ群（`patches/transformers-portable.patch`、`patches/transformers-directml.patch`、`patches/sqlite-official.patch`）。環境分離・Wasm 安定化・DirectML 認識・バグ回避のために必須。 |
+| manifests/embeddinggemma2-q4.json | モデルの 11 資材の完全性（ファイルサイズ、SHA-256、artifactSetHash、fingerprint、license、profile）を定義し、推論初期化時に検証する。`npm run lock:model` または `npm run lock-assets`（`scripts/assets/lock-model.ts` / `lock-assets.ts`）により仕様定義および配置資材から生成・ロックする（`node scripts/download-assets.mjs` 初回実行時に未存在の場合は、内部で `scripts/assets/lock-model.ts` を自動実行して正準マニフェストを生成してからモデル取得へ進む）。 |
 | 推論モデル (EmbeddingGemma 2) | HuggingFace の固定リビジョンから 11 資材を取得し、`model/embeddinggemma-2-ONNX/daa72c51243991dfcaf9f9137d2c573d8f7790c0/` へ配置する。 |
 
 ---
@@ -25,13 +26,24 @@
 
 以下の資材を `downloads/` 配下に配置する。
 
-| 保存先 | 入手出元・URL | 用途・補足 |
+| 保存先 | 入手出元・URL | 用途・補足・完全性要件 |
 | --- | --- | --- |
-| `downloads/sqlite-official-host/` | Debian 12 (bookworm) official repository | SQLite 再生成コンテナ用 host deb 集合（77 deb、詳細は [linux-toolchain.md](linux-toolchain.md)） |
-| `downloads/sqlite-src-3540100.zip` | `https://sqlite.org/2026/sqlite-src-3540100.zip` | SQLite 3.54.1 フルソース（Wasm 再生成用） |
-| `downloads/vec1.c` | SQLite 公式 vec1 Fossil リポジトリ (`https://sqlite.org/vec1`)<br>URL: `https://sqlite.org/vec1/raw/vec1.c`（または trunk ソースツリー `ext/vec1/vec1.c`、`https://sqlite.org/vec1/file/vec1.c`） | vec1 0.8 C ソース（日付: 2026-02-04、`#define VEC1_VERSION "0.8"`、Scalar single-threaded 組み込み用） |
-| `downloads/sqlite-official/` | SQLite フルソース + vec1.c より再生成（8 ファイル） | SQLite 3.54.1 + vec1 0.8 組み込み完成ランタイム群：<br>- `sqlite3.wasm`<br>- `sqlite3-node.mjs`<br>- `sqlite3-bundler-friendly.mjs`<br>- `sqlite3.mjs`<br>- `sqlite3-opfs-async-proxy.js`<br>- `sqlite3-worker1.mjs`<br>- `sqlite3-worker1-bundler-friendly.mjs`<br>- `sqlite3-worker1-promiser.mjs` |
-| `downloads/sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz` | `https://codeload.github.com/sqlite/sqlite-wasm/tar.gz/ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a` | 公式 9 デモ検証用・ビルド済みローダー収録リポジトリアーカイブ |
+| `downloads/sqlite-official-host/` | Debian 12 (bookworm) official repository (`https://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz`) | SQLite 再生成コンテナ用 host deb 集合（77 deb）。`scripts/download-assets.mjs` の `ensureDebianDebs()` により `Packages.gz` メタデータから `Filename`・`Size`・`SHA256` を解決して自動取得・検証する（詳細は [linux-toolchain.md](linux-toolchain.md)） |
+| `downloads/python-debian/` | Debian 12 (bookworm) official repository (`https://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz`) | Python 実行環境用 deb 集合（13 deb）。`scripts/download-assets.mjs` の `ensureDebianDebs()` により自動取得・検証する（`sqlite-official-host` と重複する 5 deb は再取得せずコピー配置後にサイズ・SHA-256 を検証、詳細は [linux-toolchain.md](linux-toolchain.md)） |
+| `downloads/sqlite-src-3540100.zip` | `https://sqlite.org/2026/sqlite-src-3540100.zip` | SQLite 3.54.1 フルソース（Wasm 再生成用）<br>- サイズ: 14,899,528 バイト<br>- SHA-256: `387e7f6cad4797b17848c07d453dc6606917bb356a6cfe5a3abafd38c240c71b`<br>- 内部に VERSION=3.54.1 および `sqlite-src-3540100/ext/vec1/vec1.c` を同梱 |
+| `downloads/vec1.c` | `downloads/sqlite-src-3540100.zip` 内の `sqlite-src-3540100/ext/vec1/vec1.c` より展開・抽出（標準調達手順）<br>（参照元: SQLite 公式 vec1 Fossil リポジトリ `https://sqlite.org/vec1`。※注意: 単体 URL `https://sqlite.org/vec1/raw/vec1.c` は Bot 防御・Browser Verification により HTML が返却されるため、未検証ダウンロードは不可） | vec1 0.8 C ソース（日付: 2026-02-04、Scalar single-threaded 組み込み用）<br>- サイズ: 378,128 バイト<br>- SHA-256: `a38c62274093bec34631831371ad433703d6dde7fa9ecd6088da4ed33d4a61f9`<br>- 必須マクロ: `#define VEC1_VERSION "0.8"`<br>- 内容検証: HTML 誤検出防止（`<!DOCTYPE`, `<html` 等を含まない C ソースであること） |
+| `downloads/sqlite-official/` | SQLite フルソース + vec1.c より再生成（8 ファイル） | SQLite 3.54.1 + vec1 0.8 組み込み完成ランタイム群（実行時 `vec1_info()` は `"version 0.8 (Scalar, single-threaded)"`）：<br>- `sqlite3.wasm`<br>- `sqlite3-node.mjs`<br>- `sqlite3-bundler-friendly.mjs`<br>- `sqlite3.mjs`<br>- `sqlite3-opfs-async-proxy.js`<br>- `sqlite3-worker1.mjs`<br>- `sqlite3-worker1-bundler-friendly.mjs`<br>- `sqlite3-worker1-promiser.mjs` |
+| `downloads/sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz` | `https://codeload.github.com/sqlite/sqlite-wasm/tar.gz/ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a` | 公式 9 デモ検証用・ビルド済みローダー収録リポジトリアーカイブ<br>- サイズ: 1,221,483 バイト<br>- SHA-256: `8a428f3330278c96073c6afda8d8a51921a18a330000f99645c5d7051409a795` |
+
+### 2.1 上流パッチ資材 (`patches/`)
+
+製品ビルドおよび整合性テストにおいて、上流ライブラリの環境互換性・不具合解消・ランタイム分離を決定論的に保証するため、以下の 3 パッチをプロジェクト資材として固定・管理する。パッチの省略、別版への差替え、実行時自動フォールバックによる成功扱いは禁止する。
+
+| パッチファイル | 適用対象ライブラリ | 目的・変更内容 | 完全性検証要件 |
+| --- | --- | --- | --- |
+| `patches/transformers-portable.patch` | `@huggingface/transformers@4.3.1`<br>(`src/backends/onnx.js`, `src/utils/model-loader.js`, `src/models/session.js`) | 1. `ONNX_NODE` 参照の除去と `supportedDevices.push('wasm'); defaultDevices = ['wasm'];` への統一、および `ONNX_ENV.setLogLevel = setLogLevel; env.backends.onnx = ONNX_ENV;` 直接参照代入によるスレッド数 (`numThreads: 1`) 設定の完全反映と動的 `blob:` URL 抑止（Node.js ESM 環境での `ERR_UNSUPPORTED_ESM_URL_SCHEME` 回避）<br>2. セッション作成 (`webInitChain`)・推論直列化キュー (`webInferenceChain`) の例外連鎖分離（先行失敗による後続ブロッキング防止）<br>3. `getCoreModelFile` および `getModelDataFiles` における `return_path` 最適化の無効化（`apis.IS_NODE_ENV` → `false`、Uint8Array メモリバッファ供給）<br>4. セッション例外時の `logger.error` 2 行（エラー本文および入力テンソル `formatted` 出力）の削除 | UTF-8 LF（末尾改行必須）、`manifests/runtime-lock.json` にてファイルサイズおよび SHA-256 を固定・照合 |
+| `patches/transformers-directml.patch` | `@huggingface/transformers@4.3.1`<br>(`src/backends/onnx.js`, `src/utils/model-loader.js`, `src/models/session.js`) | 1. `Symbol.for('onnxruntime')` 注入時（`supportedDevices.push('dml', 'cpu'); defaultDevices = ['dml'];`）および Node 実行時（`defaultDevices = ['dml'];`）に DirectML デバイス認識を有効化し、GPU テンソル計算を優先実行。CPU への無言のフォールバックを防止<br>2. `ONNX_ENV.setLogLevel = setLogLevel; env.backends.onnx = ONNX_ENV;` 直接参照結合と直列化キュー (`webInitChain` / `webInferenceChain`) の例外連鎖分離<br>3. `getCoreModelFile` および `getModelDataFiles` における `return_path` 最適化の無効化（`apis.IS_NODE_ENV` → `false`、`DirectMlModelCache` からのメモリバッファ供給）<br>4. セッション例外時の `logger.error` 2 行（エラー本文および入力テンソル `formatted` 出力）の削除 | UTF-8 LF（末尾改行必須）、`manifests/runtime-lock.json` にてファイルサイズおよび SHA-256 を固定・照合 |
+| `patches/sqlite-official.patch` | 公式配布資材<br>(`sqlite3-node.mjs`) | 上流 CAPI 文字列バインドの不具合修正（`Array.isArray(text)` 判定への訂正、`allocCString(text, true)` および `allocCString(pMem, true)`） | UTF-8 LF（末尾改行必須）、`manifests/runtime-lock.json` にてファイルサイズおよび SHA-256 を固定・照合 |
 
 ---
 
@@ -58,5 +70,40 @@
 
 ## 4. 資材の整合性検証
 
-プロジェクトに必要な資材の存在確認は `npm run test:assets`（`test/integration/test-assets.ts`）により機械的に検証する。
-全 11 モデル資材の正確な SHA-256 ダイジェストおよびファイルサイズが `manifests/embeddinggemma2-q4.json` と一致することを確認し、欠落や破損がある場合は推論初期化を中止する。
+### 4.1 ビルド入力資材（downloads/）の検証
+
+`scripts/download-assets.mjs` により、ビルド入力資材の存在・サイズ・SHA-256・内容妥当性を機械的に検証する。
+
+1. **`downloads/sqlite-src-3540100.zip`**:
+   - バイトサイズ: 14,899,528 バイト、SHA-256: `387e7f6cad4797b17848c07d453dc6606917bb356a6cfe5a3abafd38c240c71b`
+2. **`downloads/vec1.c`**:
+   - SQLite 公式 Fossil URL (`https://sqlite.org/vec1/raw/vec1.c`) への単体アクセスは、Bot 検証機構（Browser Verification）等により HTML が返却される場合がある。スクリプトによる取得時はレスポンスの Content-Type および先頭バイト（`<!DOCTYPE`, `<html`）を検査し、HTML 誤取得を防止する。
+   - `sqlite-src-3540100.zip` に同梱されている `sqlite-src-3540100/ext/vec1/vec1.c` から展開・抽出することを標準手順とし、以下の完全性を検証する：
+     - バイトサイズ: 378,128 バイト
+     - SHA-256: `a38c62274093bec34631831371ad433703d6dde7fa9ecd6088da4ed33d4a61f9`
+     - 必須マクロ: `#define VEC1_VERSION "0.8"` が含まれていること（実行時 `SELECT vec1_info()` も `"version 0.8 (Scalar, single-threaded)"` を返す）
+3. **`downloads/sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz`**:
+   - バイトサイズ: 1,221,483 バイト、SHA-256: `8a428f3330278c96073c6afda8d8a51921a18a330000f99645c5d7051409a795`
+4. **`downloads/sqlite-official-host/` (77 deb) および `downloads/python-debian/` (13 deb)**:
+   - `scripts/download-assets.mjs` の `ensureDebianDebs()` により、Debian bookworm メタデータ（`https://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz` → `downloads/sqlite-official-host/Packages.gz`）を取得・展開し、全 90 配置パス（85 種類）の `Filename`（`https://deb.debian.org/debian/<Filename>`）、`Size`、および `SHA256` ダイジェストを解決してダウンロード・検証する（重複する 5 ファイルは `sqlite-official-host` から `python-debian` へコピー配置した上でサイズ・SHA-256 を検証する）。
+
+### 4.2 推論モデル資材の完全性検証と資材ゲート
+
+1. **マニフェストによる静的完全性検証と初回自動生成**:
+   - `scripts/assets/lock-model.ts`（`npm run lock:model`）および `scripts/assets/lock-assets.ts`（`npm run lock-assets`）により、固定リビジョン `daa72c51243991dfcaf9f9137d2c573d8f7790c0` に対応する正準マニフェスト `manifests/embeddinggemma2-q4.json` を生成・ロックする（`lock-model.ts` は `model/` ディレクトリ未作成のクリーン状態でも正準マニフェスト定義 `CANONICAL_MANIFEST` を書き出す）。
+   - `scripts/download-assets.mjs` は、実行時に `manifests/embeddinggemma2-q4.json` がまだ存在しない場合、自動的に `scripts/assets/lock-model.ts` を子プロセス実行（`execFileSync(process.execPath, ["scripts/assets/lock-model.ts"])`）して正準マニフェストを生成した上で、全 11 モデル資材のダウンロードおよびファイル存在・ファイルサイズ・SHA-256 の機械的照合へ進む（マニフェスト不在によるモデル取得スキップを発生させない）。不整合時は再取得・異常停止を行う。
+   - 公式 Hugging Face API とのメタデータ照合のみでは製品資材ゲートの成功とはみなさず、製品内マニフェスト `manifests/embeddinggemma2-q4.json` との決定論的照合を完了条件とする。
+
+2. **実資材統合試験ゲート (G05 実資材ゲート)**:
+   - `npm run test:assets`（`test/integration/test-assets.ts`）は、製品コード（`src/runtime-assets/model-contract.ts`、`src/sqlite/node-model-cache.ts`）整備後に実行される G05 受入ゲートである。
+   - 単にマニフェストファイルが存在するだけでなく、実ローカルモデルサーバー（`test/integration/local-model-server.ts`）を起動し、実バイトによるオンラインキャッシュ取得、オフライン整合性検証、破損資材の検知・拒否・修復、並行取得排他、非対象ファイル保護を検証する。全 11 モデル資材の正確な SHA-256 ダイジェストおよびファイルサイズが一致しない場合、推論初期化を中止する。
+
+### 4.3 上流パッチ資材の完全性検証とビルド契約
+
+1. **パッチ完全性ロック契約**:
+   - 推論ビルド (`scripts/build/inference.ts`) および製品パッケージビルド (`scripts/build/package.ts`) は、実行時に `patches/` ディレクトリ配下の各パッチファイルの存在、ファイルサイズ、SHA-256 ダイジェストを機械的に照合する。
+   - 正準ランタイムロックファイル `manifests/runtime-lock.json`（および `dist/runtime-lock.json`）の `patches` フィールドに、全 3 パッチのハッシュ値を確定・記録する。
+   - パッチの欠落、内容改変、未適用、別版への差し替え、実行時自動フォールバックによる推論の代行は `E_ASSET_INTEGRITY` またはビルド中断とし、成功扱いにしない。
+2. **パッチ適用検証**:
+   - `scripts/build/inference.ts` は、`git apply --unidiff-zero --ignore-space-change --ignore-whitespace` コマンドを用いてステージング領域へ決定論的にパッチを適用する。
+   - パッチ適用後の作業ツリーよりエクスポートコードをバンドルし、生成されるバンドル成果物（Node Wasm CJS、ブラウザ Wasm/WebGPU ESM、DirectML CJS）が所定の境界条件を満たすことを単体テストおよび実推論テスト（Wasm パリティ、DirectML 実行プロバイダー確認等）により検証する。

@@ -14,13 +14,13 @@
 
 | package path | types | 実行入口 / 条件 |
 | --- | --- | --- |
-| `.` | `dist/index.d.ts` (ESM: `dist/index.d.mts`) | `node`: `dist/node/index.js` (CJS) / `dist/node/index.mjs` (ESM)<br>`import`: `dist/index.mjs`<br>`browser`: `dist/index-browser.mjs`<br>`main`: `dist/index.bundle.js` |
-| `./browser` | `dist/index-browser.d.ts` | `dist/index-browser.mjs` |
-| `./node` | `dist/index.d.ts` | import/requireを上と同じく分離 |
+| `.` | `dist/index.d.ts` (ESM: `dist/index.d.mts`) | `browser`: `dist/index-browser.mjs`<br>`node`: `import` → `dist/node/index.mjs`, `require` / `default` → `dist/node/index.js`<br>`default`: `dist/node/index.js`<br>`main`: `dist/index.bundle.js` |
+| `./browser` | `dist/index-browser.d.ts` | `default`: `dist/index-browser.mjs` |
+| `./node` | `dist/index.d.ts` | `import` → `dist/node/index.mjs`, `require` / `default` → `dist/node/index.js` |
 | `./sqlite3.wasm` | なし | `dist/sqlite3.wasm` |
 | `./package.json` | なし | `./package.json` |
 
-公開設定として `"private": false` および `"publishConfig": { "access": "public" }` を定義する。同梱ファイル (`files`) は `dist`, `manifests`, `README.md`, `LICENSE` 等の実在資材に限定し、欠損パスを含めない。
+公開設定として `"private": false` および `"publishConfig": { "access": "public" }` を定義する。同梱ファイル (`files`) は `dist`, `manifests`, `README.md`, `LICENSE`, `samples` の実在資材に限定し、欠損パスを含めない。
 
 条件exportのtypesを先頭にする。root `main` は `./dist/index.bundle.js`、`types` は `./dist/index.d.ts`、Node engineは `>=24 <25`。CommonJS利用時のinitializerは `require(packageName).default`。Node ESM wrapperはCommonJSのdefaultを明示再exportし、CommonJS namespaceをinitializerとして返さない。
 
@@ -88,18 +88,19 @@ vec1 は C の static auto-extension（`sqlite3_wasm_extra_init.c` による `sq
 
 ### 4.1 SQL関数一覧
 
-モデル非依存の汎用関数を提供する。
+モデル非依存の汎用関数および診断用関数を提供する。`embedding` および `embedding_query` は `SQLITE_UTF8 | SQLITE_DIRECTONLY` フラグで登録し、VIEW や TRIGGER 経由の間接実行を拒否する。
 
 | 関数 | 登録arity | 用途 |
 | --- | :--- | :--- |
-| `embedding(text[, model])` | 1、2 | 文書（document）向け埋め込みベクトルの生成 |
-| `embedding_query(text[, model])` | 1、2 | 検索クエリ（query）向け埋め込みベクトルの生成 |
+| `embedding(text[, model])` | 1、2 | 文書（document）向け埋め込みベクトルの生成（`SQLITE_UTF8 \| SQLITE_DIRECTONLY`） |
+| `embedding_query(text[, model])` | 1、2 | 検索クエリ（query）向け埋め込みベクトルの生成（`SQLITE_UTF8 \| SQLITE_DIRECTONLY`） |
 | `DISTANCE(left, right)` | 2 | 2つの Float32 ベクトル間のコサイン距離 (0〜2) |
+| `gemma_model_info()` | 0 | 推論・キャッシュ状態の JSON 文字列返却（推論無効時: `{"ready":false}`、有効時: `{"ready":true,"modelId":"google/embeddinggemma-2","dtype":"q4","dimension":768,"backend":...,"fingerprint":...,"functionCalls":...,"cache":{...}}`） |
 
 ### 4.2 方式A: `VECTOR(dim, 'model')` 型定義と自動モデル判断
 
 #### 4.2.1 DDL 構文とスキーマ解析
-SQLite の動的型付けアフィニティおよび DDL 透過インターセプトを活かし、テーブル定義時にベクトル型およびメタデータを定義する：
+SQLite の動的型付けアフィニティおよび SQLite C コアへの限定上流パッチを活かし、テーブル定義時にベクトル型およびメタデータをネイティブに定義する：
 ```sql
 CREATE TABLE documents (
   id INTEGER PRIMARY KEY,
@@ -107,27 +108,55 @@ CREATE TABLE documents (
   embedding VECTOR(768 , 'embeddinggemma-2')
 ) STRICT;
 ```
-- ライブラリは `CREATE TABLE` 実行時または接続初期化時に DDL をインターセプト・解析し、テーブル名・カラム名・次元数・モデル名のマッピング辞書を構築・保持する。内部的には SQLite のネイティブストレージ層（`STRICT` 指定テーブルを含む）へ透過的に適合させる。
+
+##### 独自SQL parser禁止の厳守と C 言語パッチ・公式APIによるメタデータ取得方式
+「1. 製品境界」に定める独自SQL parser新設禁止を厳守し、テーブル定義やスキーマの解析にフルASTを構築する独自構文解析器を用いない。SQLite C 言語レベルの限定パッチ（Lemon パーサー文法拡張および STRICT 列型検証）と公式機構・CAPI機能に限定して実装する：
+1. **SQLite C レベル限定パッチによる Lemon 文法拡張と STRICT テーブルの VECTOR 型ネイティブ受容**:
+   - **Lemon パーサー文法規則の拡張（`src/parse.y`）**:
+     - SQLite 公式の Lemon パーサー文法（`src/parse.y` の `typetoken` 規則）は、型引数として数値（`signed`）のみを許容しており、文字列リテラルや識別子を含む型宣言を Lemon パーサーの構文解析段階で文法エラー（`near "...": syntax error`）として拒否する。
+     - 上流 `src/parse.y` では `%token_class ids ID|STRING.` として `ids` トークンクラスが識別子（`ID`）と文字列リテラル（`STRING`）の双方を包含しているため、`STRING` 個別規則と `ids` 規則を同時に追加すると Lemon ジェネレータで reduce/reduce 競合（`1 parsing conflicts`）が発生する。このため、実装時は `typetoken(A) ::= typename(A) LP signed COMMA ids RP(Y). { A.z = A.z; A.n = (int)(&Y.z[Y.n] - A.z); }` の 1 規則を追加することで、パーサー競合を発生させずに `VECTOR(768, 'embeddinggemma-2')`（文字列リテラル）および `VECTOR(512, bekko)`（クォートなし識別子）の双方を Lemon パーサーがネイティブに構文受理するよう拡張する（概念上は `STRING` と識別子の双方を受理する規則と同義）。
+   - **アフィニティ解決と宣言型文字列の完全保持（`src/build.c` / `sqlite3.c`）**:
+     - カラム追加処理（`sqlite3AddColumn`）およびアフィニティ解決関数（`sqlite3AffinityType`）において、型名先頭が `VECTOR`（case-insensitive）である列を `SQLITE_AFF_BLOB` アフィニティとして解決する。
+     - 同時に、元の宣言型文字列全体（例: `VECTOR(768, 'embeddinggemma-2')`）をカラム情報（`zType`）にそのまま保持し、型指定フラグ（`COLFLAG_HASTYPE`）およびカスタム型分類（`COLTYPE_CUSTOM`）を維持する。
+   - **STRICT テーブルにおける列型検査の受容と BLOB 型制約の厳格適用（`src/build.c` / `src/vdbe.c` / `sqlite3.c`）**:
+     - SQLite の `STRICT` テーブルは既定で `INT, INTEGER, REAL, TEXT, BLOB, ANY` 以外の型（`COLTYPE_CUSTOM`）を未知の型として拒否するが、`sqlite3EndTable` において型名先頭が `VECTOR`（case-insensitive）である列を例外受容し、テーブル作成を通過させる。
+     - STRICT テーブルの実行時バリデーション（`src/vdbe.c` の `OP_TypeCheck` による INSERT / UPDATE 時の型検証）においては、`eType == COLTYPE_CUSTOM && pCol->affinity == SQLITE_AFF_BLOB` の列に対して `COLTYPE_BLOB` と同等の型検査を適用し、BLOB（および NULL）以外のデータ型（INTEGER, REAL, TEXT）の代入は SQLite コアによって厳格に拒否される。
+   - **透過的な CAPI 実行とスキーマ永続性**:
+     - これにより、TypeScript 側で DDL 文字列の再パースや正規表現によるキーワード置換・除去を一切行うことなく、低レベル CAPI（`sqlite3_exec` 等）から直接発行された DDL も完全に透過的に機能する。
+     - データベース再オープン後も `sqlite_schema` から元の型宣言が完全に復元され、PRAGMA 経由でのメタデータ取得が維持される。
+2. **公式カタログおよびPRAGMAによるメタデータ抽出**:
+   - テーブル作成時および接続初期化時、ライブラリは `sqlite_schema`（旧 `sqlite_master`）テーブルまたは `PRAGMA table_info(tableName)` / `PRAGMA table_xinfo(tableName)` を実行し、SQLite 自身が構文解析・保持した正規化カラム名と宣言型（`type` 文字列、例: `VECTOR(768, 'embeddinggemma-2')`）を取得する。
+3. **型定義トークンの抽出（非パーサー）**:
+   - 取得した宣言型文字列に対してのみ、単純な型パラメータ抽出正規表現（例: `/^VECTOR\s*\(\s*(\d+)(?:\s*,\s*['"]?([^'")]+)['"]?)?\s*\)$/i`）を適用して次元数 `dim` とモデル名 `model` を抽出する。これはSQL文の構文木解析ではなく、SQLite公式パーサーが抽出済みの型文字列のデコードに限定される。
 
 #### 4.2.2 `[model]` パラメータの自動解決優先順位
 SQL 文中で `embedding(text)` や `embedding_query(text)` の第2引数 `[model]` が省略された場合、以下の優先順位で自動解決される：
 
 1. **明示指定**: `embedding(text, 'model_name')` が渡されている場合は最優先で使用。
-2. **カラムコンテキスト（INSERT / UPDATE）**: 実行中の SQL 文を解析し、代入先カラムが `VECTOR(dim, 'model')` として定義されていればそのモデル名を自動採用。
+2. **カラムコンテキスト（INSERT / UPDATE）**: 実行中の代入先カラムが `VECTOR(dim, 'model')` として定義されていればそのモデル名を自動採用。
 3. **DB 内の一意モデル**: データベース内に定義されている `VECTOR` 型のモデルが 1 種類のみの場合、すべての省略呼び出しでそのモデルを自動採用。
 4. **デフォルトモデル設定**: アプリ初期化時に指定された `defaultModel` を採用。
 5. いずれにも該当しない場合は `E_MODEL_UNBOUND` エラーを送出。
+
+##### カラムコンテキスト解決における独自パーサー排除方式
+実行中の SQL 文を解析するにあたり、独自 SQL パーサーによる構文木（AST）解析は新設しない。以下の方式で代入先カラムを特定する：
+- **SQLite 公式 Authorizer（`sqlite3_set_authorizer`）の活用**:
+  - SQLite が SQL 文をコンパイル（`sqlite3_prepare_v2`）する際、SQLite 本体の Lemon パーサーが各操作文脈を認可コールバックへ通知する。
+  - `SQLITE_INSERT`（`actionCode === 18`、`arg1`: テーブル名）、`SQLITE_UPDATE`（実 SQLite CAPI では `actionCode === 23`、単体テスト fixture 互換では `actionCode === 9`、`arg1`: テーブル名、`arg2`: カラム名）、および `SQLITE_FUNCTION`（`actionCode === 31`、`arg2`: 関数名）のアクション通知シーケンスを内部監視することで、独自に文法解析を行うことなく、SQLite 自身が確定した対象テーブル・カラムのコンテキストを取得する。
+  - なお、実 SQLite CAPI における `SQLITE_DELETE`（`9`）は `arg1` にテーブル名のみを渡し `arg2`（カラム名）は常に `null`/`undefined` となるため、`resolveModelFromAuthorizer` では `arg1`（テーブル名）と `arg2`（カラム名）の双方が非空文字列として存在し、かつ `actionCode === 23 || actionCode === 9` である通知を UPDATE 対象カラム通知として扱うことで、実 SQLite ランタイムの `SQLITE_DELETE` と混同することなく単体テスト契約（`vector-type-and-model-resolution-spec.test.ts`）および実 CAPI 動作の双方を満たす。
+- **曖昧時のフォールバック原則**:
+  - サブクエリ、複雑な式、CTE、または複数 VECTOR カラムの同時更新等により SQLite の標準コンテキスト通知から代入先カラムまたはモデルが一意に特定できない文脈では、無理な独自構文推定を行わず、後続の優先順位（「3. DB 内の一意モデル」「4. デフォルトモデル設定」）へフォールバックする。確定できない場合は安全に `E_MODEL_UNBOUND` を送出する。
 
 ### 4.3 距離関数 `DISTANCE(left, right)`
 
 どちらかが NULL なら NULL。その他は両方 BLOB、同一バイト長（`dim * 4` バイト）、有限 Float32 配列を要求し、不適合は `E_INPUT`。
 コサイン距離計算式: `1 - dot(left, right) / (norm(left) * norm(right))`。同一 0、直交 1、逆向き 2 を返す。入力ベクトルの次元数は 512, 768, 256 など登録モデルの次元数に柔軟に対応する。
 
-### 4.4 動的モデルプロファイルと外部資材（ゼロダウンロード）
+### 4.4 動的モデルプロファイルと推論ライフサイクル
 
-- **事前定義不要**: ライブラリ内部に特定モデルをハードコードせず、アプリ側が利用時に任意の ONNX モデル（ruri-v3, bekko, Gemma 等）のパスと設定を動的登録可能。
-- **自動ダウンロードの完全排除**: ライブラリ自身による外部ネットワーク通信（Hugging Face 等からの自動フェッチ）は一切行わず、アプリ側で事前に配置されたローカルファイル資材のみを読み込む。
-- **遅延初期化**: `embedding` 関数が実際に SQL で評価されるまで推論 Worker / ONNX Runtime の起動を行わず、通常 SQL や vec1 仮想テーブルはゼロオーバーヘッドで即座に動作する。
+- **動的モデルプロファイル（任意モデル対応）**: ライブラリ組込みの参照モデル（EmbeddingGemma-2）に加え、アプリ側がローカル配置した任意の ONNX モデル（ruri-v3, bekko 等）のプロファイル定義（`ModelProfileDefinition`）および推論Workerを `registerEmbeddingExtension` 経由で動的にバインド可能。独自モデル運用時はライブラリ自身による外部通信を行わない完全オフライン・ゼロダウンロード動作となる。
+- **参照モデルの二系統ネットワーク制御**: 公式初期化（`initialize({ embedding: ... })`）では、`network: "allow"` 時は指定 `baseUrl` または既定の Hugging Face 固定リビジョンから固定11資材をストリーム取得して永続キャッシュを構築し、`network: "offline"` 時は外部通信を一切遮断してローカルキャッシュのみを利用する（不足時は `E_MODEL_CACHE_MISS`）。
+- **推論セッション先行準備と省略時ゼロオーバーヘッド（Eager Session Warm-up）**: `embedding` オプション省略時は推論 Worker / ONNX Runtime の起動を行わず通常 SQL や vec1 仮想テーブルが即座に動作する（3.1）。一方、`embedding` 有効化時はクエリ実行時の遅延や予期せぬ失敗を排除するため、遅延初期化を行わず、初期化フェーズで即座に推論 Worker / セッションを立ち上げ、query および image の warm-up 完了まで初期化を resolve しない契約（3.3）とする。
 
 ## 5. 実行内LRU
 

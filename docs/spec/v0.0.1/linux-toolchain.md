@@ -6,7 +6,7 @@
 
 基準の生成処理が直接使う資材に限定する。汎用Debian rootfsを構築するためのAPT bootstrap、build-essential、Tcl dev、Python venv、Git/curl等の追加一律取得は不要である。取得hostのNode/npm/Git/curlと、Linux x64/glibc基盤のsh/ar/tar/unzip等は環境の前提とし、搬入する資材と混同しない。
 
-host debはOS全体へinstallせずrun専用directoryへ展開する。基盤glibcを上書きしない。基準処理が使う94配置pathは、重複を除くと85種類のdebである。同じfileを再取得する必要はないが、3集合の相対保存先は維持する。
+host debはOS全体へinstallせずrun専用directoryへ展開する。基盤glibcを上書きしない。基準処理が使う90配置pathは、重複を除くと85種類のdebである。同じfileを再取得する必要はないが、2集合（`downloads/sqlite-official-host` の 77 deb、`downloads/python-debian` の 13 deb）の相対保存先は維持する。
 
 ---
 
@@ -117,20 +117,42 @@ readline-common_8.2-1.3_all.deb
 ```
 
 取得元はDebian bookworm/mainの署名付きmetadataで確認し、Package/Version/Architecture/Filenameを対応付ける。直接URLは `https://deb.debian.org/debian/` とFilenameを連結する。metadata取得URLは `https://deb.debian.org/debian/dists/bookworm/main/binary-amd64/Packages.gz` 。
+`scripts/download-assets.mjs` の `ensureDebianDebs()` は、この `Packages.gz` を `downloads/sqlite-official-host/Packages.gz` へ取得して展開し、各パッケージの `Filename`・`Size`・`SHA256` を解決した上で、`downloads/sqlite-official-host/`（77 deb）および `downloads/python-debian/`（13 deb）を自動取得・検証する（重複する 5 deb は再取得せず `sqlite-official-host` から `python-debian` へコピー配置した後にサイズ・SHA-256 を検証する）。
 
 ---
 
-## 4. 専用directoryへの展開
+## 4. 専用directoryへの展開と `emcc` sysroot 汚染防止
 
 | builder | 展開する集合と利用方法 |
 | --- | --- |
-| SQLite | sqlite-official-host/*.debとpython-debian/*.debを新規host rootへ展開。gccはそのrootのsysroot/GCC_EXEC_PREFIXを使うwrapperから起動。make/Tcl/Pythonは展開rootを明示する |
+| SQLite | `sqlite-official-host/*.deb` と `python-debian/*.deb` を新規 host root（`${HOST_ROOT}`）へ展開。`gcc` / `cc` はその root の `-B` / `-isystem` / `-L` を使う wrapper から起動。`make` / `Tcl` / `Python` は展開 root を明示する |
 
-debはarでdata.tar.xzまたはdata.tar.gzを取り出して専用rootへ展開する。OS全体へのdpkg/apt installやglibc差替えを前提にしない。SQLiteのhost overlayは基盤のloader/libc/libm等を上書きせず、必要な他libraryを参照する。TCL_LIBRARY、TCL8_6_TM_PATH、PYTHONHOME、EMSDK_PYTHON、PATH、LD_LIBRARY_PATHはそのrunと子process内だけに設定する。
+1. **deb の展開と基盤 glibc の保護**:
+   - 各 deb は `ar x` で `data.tar.xz`、`data.tar.gz`、または `data.tar.zst` を取り出して専用 `${HOST_ROOT}` へ展開する。OS 全体への `dpkg` / `apt install` や glibc 差替えを前提にしない。
+   - コンテナ基盤の動的ローダー・共有 `libc` / `libm` 等を上書きしないよう、`libc6_*.deb` 本体の展開はスキップする（`if [[ "$(basename "$deb")" == libc6_* ]]; then return 0; fi`）。一方、ホスト `gcc` コンパイルに必要なヘッダ・CRT オブジェクトを含む `libc6-dev_*.deb` および `linux-libc-dev_*.deb` は `${HOST_ROOT}` へ展開する。
+2. **`gcc` / `cc` ラッパースクリプトと `C_INCLUDE_PATH` / `LIBRARY_PATH` の隔離（重要）**:
+   - **グローバル環境変数 `C_INCLUDE_PATH`、`CPLUS_INCLUDE_PATH`、`LIBRARY_PATH` は絶対に設定してはならない（明示的に `unset C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH` を実行する）**。
+   - 理由: Emscripten（`emcc` / `clang -target wasm32-unknown-emscripten`）は、環境変数 `C_INCLUDE_PATH` が設定されていると Emscripten 本来の `wasm32` sysroot より先にホスト x86_64 glibc ヘッダ（`${HOST_ROOT}/usr/include/x86_64-linux-gnu/gnu/stubs.h`）を探索し、32-bit ターゲット（`__WORDSIZE == 32`）であるために `fatal error: 'gnu/stubs-32.h' file not found` でコンパイルエラーとなる。
+   - このため、ホスト用インクルードパスおよびライブラリパス（`-B` / `-isystem` / `-L`）はグローバル環境変数ではなく、以下のように `${WRAP_BIN}/gcc`（および `ln -sf "${WRAP_BIN}/gcc" "${WRAP_BIN}/cc"`）ラッパースクリプトの内部にのみ閉じ込める：
+     ```bash
+     #!/usr/bin/env bash
+     exec "${HOST_ROOT}/usr/bin/gcc-12" \
+       -B"${HOST_ROOT}/usr/lib/gcc/x86_64-linux-gnu/12" \
+       -B"${HOST_ROOT}/usr/lib/x86_64-linux-gnu" \
+       -B"${HOST_ROOT}/usr/bin" \
+       -isystem "${HOST_ROOT}/usr/lib/gcc/x86_64-linux-gnu/12/include" \
+       -isystem "${HOST_ROOT}/usr/include/x86_64-linux-gnu" \
+       -isystem "${HOST_ROOT}/usr/include" \
+       -L"${HOST_ROOT}/usr/lib/gcc/x86_64-linux-gnu/12" \
+       -L"${HOST_ROOT}/usr/lib/x86_64-linux-gnu" \
+       -L"${HOST_ROOT}/lib/x86_64-linux-gnu" \
+       "$@"
+     ```
+   - `PATH`、`LD_LIBRARY_PATH`、`TCL_LIBRARY`、`PYTHONHOME`、`EMSDK_PYTHON` はそのビルド実行（run）と子プロセス内だけに設定する。これにより、ホスト側のコード生成ツール（`lemon`, `mkkeywordhash`, `jimsh`, `mkwasmbuilds` 等）は展開した Debian bookworm の `gcc-12` を用いてビルドされ、`emcc` は Emscripten 本来の `wasm32` sysroot のみを使用してクリーンに Wasm をコンパイルできる。
 
 ---
 
 ## 5. Linux側の準備完了チェック
 
-SQLite再生成を開始する前に、専用sysrootのgcc wrapperでhost Cをcompile・実行し、展開したmake、tclsh8.6、python3.11と標準libraryが動くことを確認する。
-全toolの実起動確認が成功してから、`ext/wasm` での `make -j2 npm` ビルド工程へ進む。
+SQLite再生成を開始する前に、専用sysrootのgcc wrapperでhost Cをcompile・実行し、展開したmake、tclsh8.6、python3.11と標準library、wasm-strip、zipが動くことを確認する。
+全toolの実起動確認が成功してから、`./configure --disable-readline --disable-tcl`、`make sqlite3.c`、および `ext/wasm` での `make -j2 npm bin.wasm-opt=` ビルド工程へ進む。
