@@ -59,10 +59,10 @@ async function testOfficialSqlite(): Promise<void> {
 
     const vector = new Uint8Array(3072); new DataView(vector.buffer).setFloat32(0, 1, true);
 
-    // STRICT BLOB型制約検証: BLOB以外の型（TEXT等）の代入は拒否され、BLOBのみ受容されること
+    // STRICT VECTOR型制約検証: BLOB以外の型（TEXT等）の代入は拒否され、BLOBのみ受容されること
     assert.throws(
       () => database.exec({ sql: "INSERT INTO docs(id, text_data, embedding) VALUES(1, 'sample', 'invalid-text-vector')" }),
-      /cannot store TEXT value in BLOB column|datatype mismatch/i
+      /cannot store TEXT value in (?:VECTOR|BLOB) column|datatype mismatch/i
     );
     database.exec({ sql: "INSERT INTO docs(id, text_data, embedding) VALUES(1, 'sample', ?)", bind: [vector] });
     const insertedEmbedding = database.selectValue("SELECT embedding FROM docs WHERE id=1") as Uint8Array;
