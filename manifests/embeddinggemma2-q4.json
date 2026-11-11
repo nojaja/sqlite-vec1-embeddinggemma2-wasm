@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "modelId": "google/embeddinggemma-2",
+  "repository": "onnx-community/embeddinggemma-2-ONNX",
+  "revision": "daa72c51243991dfcaf9f9137d2c573d8f7790c0",
+  "artifactSetHash": "edc288bfd9366727abe6200cf6db45d844aac338c9055f359308334567ba661e",
+  "fingerprint": "5e730f96377d880c7ca94c9ddc9cd5f600e5237e106f5e4dc7d9448140026ac7",
+  "license": {
+    "id": "apache-2.0",
+    "metadataPath": "README.md",
+    "metadataBytes": 28720,
+    "metadataSha256": "4fe21bf1b86938ac62c7cd2d1511822e4ea6e8654e015e00b06a72676b5420e6",
+    "textPath": "LICENSE",
+    "textBytes": 11357,
+    "textSha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+  },
+  "profile": {
+    "audio": false,
+    "dtype": "q4",
+    "dimension": 768,
+    "preprocessingVersion": "embeddinggemma2-input-v1",
+    "prefixVersion": "embeddinggemma2-prefix-v1",
+    "normalizationVersion": "l2-f64-le-f32-v1",
+    "inputContractVersion": 1
+  },
+  "assets": [
+    {
+      "path": "onnx/model_q4.onnx",
+      "source": "model_q4.onnx",
+      "bytes": 490742,
+      "sha256": "f9eeba97acddf139b8ee2ddf04bc30dceafa88de93fadf74d7644e0d61a477a9",
+      "role": "text-graph",
+      "mime": "application/octet-stream",
+      "license": "apache-2.0"
+    },
+    {
+      "path": "onnx/model_q4.onnx_data",
+      "source": "model_q4.onnx_data",
+      "bytes": 174028800,
+      "sha256": "c3975f2d1ab7a1878ae31a7d7a9b7804a827aff3800b60dfceafce21cac3df49",
+      "role": "text-weights",
+      "mime": "application/octet-stream",
+      "license": "apache-2.0"
+    },
+    {
+      "path": "onnx/vision_encoder_q4.onnx",
+      "source": "vision_encoder_q4.onnx",
+      "bytes": 159400,
+      "sha256": "7ea284226d4938f0ad921ab091f1d80a9ca699aa802984ef5cd5eec4f4761d96",
+      "role": "vision-graph",
+      "mime": "application/octet-stream",
+      "license": "apache-2.0"
+    },
+    {
+      "path": "onnx/vision_encoder_q4.onnx_data",
+      "source": "vision_encoder_q4.onnx_data",
+      "bytes": 108957696,
+      "sha256": "0a9d6c927334f152a33dd90874f65d6ea5228999abe6a450d3f7813677fa704c",
+      "role": "vision-weights",
+      "mime": "application/octet-stream",
+      "license": "apache-2.0"
+    },
+    {
+      "path": "config.json",
+      "source": "config.json",
+      "bytes": 5031,
+      "sha256": "8d011bfe08b5e345bbe0b81e5c6fd02c381920b345b986047bc2a33ce7b90d1d",
+      "role": "model-config",
+      "mime": "application/json",
+      "license": "apache-2.0"
+    },
+    {
+      "path": "processor_config.json",
+      "source": "processor_config.json",
+      "bytes": 1788,
+      "sha256": "168f6a08522f3ce5dea596d94d003af2fd691742d4f41fe1f9d8cce76bfbf69c",
+      "role": "processor",
+      "mime": "application/json",
+      "license": "apache-2.0"
+    },
+    {
+      "path": "preprocessor_config.json",
+      "source": "preprocessor_config.json",
+      "bytes": 560,
+      "sha256": "9344893f8d0573a46ebb2ca54c03f56d044cea194c8dcfb1f4d652240ac21daa",
+      "role": "image-processor",
+      "mime": "application/json",
+      "license": "apache-2.0"
+    },
+    {
+      "path": "tokenizer.json",
+      "source": "tokenizer.json",
+      "bytes": 32170510,
+      "sha256": "4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4",
+      "role": "tokenizer",
+      "mime": "application/json",
+      "license": "apache-2.0"
+    },
+    {
+      "path": "tokenizer_config.json",
+      "source": "tokenizer_config.json",
+      "bytes": 1599,
+      "sha256": "17bd5d6e9364ca49a534e1502076593317c298d4a663623091ed45388f004874",
+      "role": "tokenizer-config",
+      "mime": "application/json",
+      "license": "apache-2.0"
+    },
+    {
+      "path": "config_sentence_transformers.json",
+      "source": "config_sentence_transformers.json",
+      "bytes": 1565,
+      "sha256": "031e56a498d33c349ab489a21885bcfe25b4fcba841149dc99e1e90d4a7c28f5",
+      "role": "sentence-config",
+      "mime": "application/json",
+      "license": "apache-2.0"
+    },
+    {
+      "path": "chat_template.jinja",
+      "source": "chat_template.jinja",
+      "bytes": 1016,
+      "sha256": "4b852efc0b9960283e735363331e6f325b33bc74bdbaa076f595bc4e9b94d85e",
+      "role": "template",
+      "mime": "text/plain",
+      "license": "apache-2.0"
+    }
+  ]
+}

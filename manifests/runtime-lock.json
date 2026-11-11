@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "assets": [
+    {
+      "name": "wabt-source"
+    },
+    {
+      "name": "sqlite-official-wasm"
+    },
+    {
+      "name": "sqlite-official-node-loader"
+    },
+    {
+      "name": "sqlite-official-browser-loader"
+    },
+    {
+      "name": "sqlite-official-esm-loader"
+    },
+    {
+      "name": "sqlite-official-proxy"
+    },
+    {
+      "name": "sqlite-official-worker1"
+    },
+    {
+      "name": "sqlite-official-bundler-worker1"
+    },
+    {
+      "name": "sqlite-official-promiser"
+    },
+    {
+      "name": "sqlite-wasm-package"
+    },
+    {
+      "name": "transformers-source"
+    },
+    {
+      "name": "onnxruntime-node-package"
+    },
+    {
+      "name": "onnxruntime-common-package"
+    },
+    {
+      "name": "ort-node-directml-dll"
+    },
+    {
+      "name": "ort-node-dxcompiler-dll"
+    },
+    {
+      "name": "ort-node-runtime-dll"
+    },
+    {
+      "name": "ort-node-binding"
+    },
+    {
+      "name": "ort-jsep-loader"
+    },
+    {
+      "name": "ort-jsep-wasm"
+    },
+    {
+      "name": "ort-jspi-loader"
+    },
+    {
+      "name": "ort-jspi-wasm"
+    },
+    {
+      "name": "jpeg-codec"
+    },
+    {
+      "name": "png-codec"
+    },
+    {
+      "name": "resize-codec"
+    }
+  ],
+  "patches": {
+    "patches/transformers-portable.patch": {
+      "bytes": 3669,
+      "sha256": "cc3e304d319a587fe149249bad64b5152f48a1362d8131980eb31c7b3a0c6e50"
+    },
+    "patches/transformers-directml.patch": {
+      "bytes": 1658,
+      "sha256": "cc658668f9d97aa6f73b02c0c4e72ba502cbf1abeec0c3383d75077d0c3f10d3"
+    },
+    "patches/sqlite-official.patch": {
+      "bytes": 374,
+      "sha256": "07575840bf247b7df6cd3338c6e61e8743226778f1cb66c9e3f20e1d18d8008e"
+    }
+  },
+  "toolchain": {
+    "node": "v22.23.4",
+    "platform": "win32",
+    "arch": "x64"
+  }
+}

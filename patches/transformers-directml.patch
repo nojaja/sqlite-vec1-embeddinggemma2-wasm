@@ -1,0 +1,43 @@
+--- a/src/backends/onnx.js
++++ b/src/backends/onnx.js
+@@ -102,0 +103,2 @@
++    supportedDevices.push('dml', 'cpu');
++    defaultDevices = ['dml'];
+@@ -131 +133 @@
+-    defaultDevices = ['cpu'];
++    defaultDevices = ['dml'];
+@@ -284 +286 @@
+-    const load = () =>
++    const create = () =>
+@@ -290 +292,3 @@
+-    const session = await (apis.IS_WEB_ENV ? (webInitChain = webInitChain.then(load)) : load());
++    const run = webInitChain.then(create, create);
++    webInitChain = run.then(() => undefined, () => undefined);
++    const session = await run;
+@@ -309,2 +313,4 @@
+-    const run = () => session.run(ortFeed);
+-    return apis.IS_WEB_ENV ? (webInferenceChain = webInferenceChain.then(run)) : run();
++    const execute = () => session.run(ortFeed);
++    const run = webInferenceChain.then(execute, execute);
++    webInferenceChain = run.then(() => undefined, () => undefined);
++    return run;
+@@ -382,4 +388,2 @@
+-    env.backends.onnx = {
+-        ...ONNX_ENV,
+-        setLogLevel,
+-    };
++    ONNX_ENV.setLogLevel = setLogLevel;
++    env.backends.onnx = ONNX_ENV;
+--- a/src/utils/model-loader.js
++++ b/src/utils/model-loader.js
+@@ -48 +48 @@
+-    return await getModelFile(pretrained_model_name_or_path, fullPath, true, options, apis.IS_NODE_ENV);
++    return await getModelFile(pretrained_model_name_or_path, fullPath, true, options, false);
+@@ -71 +71 @@
+-    const return_path = apis.IS_NODE_ENV;
++    const return_path = false;
+--- a/src/models/session.js
++++ b/src/models/session.js
+@@ -232,2 +231,0 @@
+-        logger.error(`An error occurred during model execution: "${e}".`);
+-        logger.error('Inputs given to model:', formatted);

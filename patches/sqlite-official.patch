@@ -1,0 +1,11 @@
+--- a/sqlite3-node.mjs
++++ b/sqlite3-node.mjs
+@@ -12381 +12381 @@
+-      }else if(Array.isArray(pMem)){
++      }else if(Array.isArray(text)){
+@@ -12390 +12390 @@
+-          [p, n] = wasm.allocCString(text);
++          [p, n] = wasm.allocCString(text, true);
+@@ -12424 +12424 @@
+-          [p, n] = wasm.allocCString(pMem);
++          [p, n] = wasm.allocCString(pMem, true);
