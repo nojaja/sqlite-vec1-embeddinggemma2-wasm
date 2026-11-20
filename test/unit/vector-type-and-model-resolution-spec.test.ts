@@ -102,6 +102,11 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts (docs/spec/v
 
     test("STRICT table enforces BLOB-only type constraint for VECTOR columns and rejects TEXT/INTEGER", () => {
       // product.md 4.2.1, build.md 2.3-6: STRICTテーブルにおいてVECTOR列はSQLITE_AFF_BLOBとして検証され、BLOB以外は拒否される契約
+      /**
+       * 処理名: STRICT型制約期待値インターフェース。
+       * 処理概要: 各種値型に対するSTRICTテーブルでの受容可否と期待アフィニティを定義する。
+       * 実装理由: STRICTテーブルにおいてVECTOR列がBLOBのみを受容し他型を拒否する契約を検証するため。
+       */
       interface StrictTypeCheckExpectation {
         valueType: "BLOB" | "TEXT" | "INTEGER" | "REAL";
         isAccepted: boolean;
@@ -166,13 +171,14 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts (docs/spec/v
         { actionCode: 18, arg1: "items" },
         { actionCode: 31, arg1: "embedding" }
       ];
+      const options: ModelResolutionOptions = {
+        explicitModel: "custom-override-model",
+        activeModels: ["ruri-v3", "bekko-v1"]
+      };
       const resolved = resolveModelFromAuthorizer(
         notifications,
         tableMetadata,
-        {
-          explicitModel: "custom-override-model",
-          activeModels: ["ruri-v3", "bekko-v1"]
-        },
+        options,
         { tableName: "items", columnName: "embedding" }
       );
       expect(resolved).toBe("custom-override-model");
@@ -184,10 +190,11 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts (docs/spec/v
         { actionCode: 9, arg1: "items", arg2: "embedding" }, // SQLITE_UPDATE items.embedding
         { actionCode: 31, arg1: "embedding" }                // SQLITE_FUNCTION embedding
       ];
-      const resolved = resolveModelFromAuthorizer(notifications, tableMetadata, {
+      const options: ModelResolutionOptions = {
         explicitModel: undefined,
         activeModels: ["ruri-v3", "bekko-v1"]
-      });
+      };
+      const resolved = resolveModelFromAuthorizer(notifications, tableMetadata, options);
       expect(resolved).toBe("ruri-v3");
     });
 
@@ -196,13 +203,14 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts (docs/spec/v
         { actionCode: 18, arg1: "items" },    // SQLITE_INSERT items
         { actionCode: 31, arg1: "embedding" } // SQLITE_FUNCTION embedding
       ];
+      const options: ModelResolutionOptions = {
+        explicitModel: undefined,
+        activeModels: ["ruri-v3", "bekko-v1"]
+      };
       const resolved = resolveModelFromAuthorizer(
         notifications,
         tableMetadata,
-        {
-          explicitModel: undefined,
-          activeModels: ["ruri-v3", "bekko-v1"]
-        },
+        options,
         { tableName: "items", columnName: "aux_vec" }
       );
       expect(resolved).toBe("bekko-v1");
@@ -214,10 +222,11 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts (docs/spec/v
       const notifications: AuthorizerNotification[] = [
         { actionCode: 31, arg1: "embedding_query" }
       ];
-      const resolved = resolveModelFromAuthorizer(notifications, tableMetadata, {
+      const options: ModelResolutionOptions = {
         explicitModel: undefined,
         activeModels: ["ruri-v3"]
-      });
+      };
+      const resolved = resolveModelFromAuthorizer(notifications, tableMetadata, options);
       expect(resolved).toBe("ruri-v3");
     });
 
@@ -226,11 +235,12 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts (docs/spec/v
       const ambiguousNotifications: AuthorizerNotification[] = [
         { actionCode: 31, arg1: "embedding" }
       ];
-      const resolved = resolveModelFromAuthorizer(ambiguousNotifications, tableMetadata, {
+      const options: ModelResolutionOptions = {
         explicitModel: undefined,
         defaultModel: "bekko-v1",
         activeModels: ["ruri-v3", "bekko-v1"]
-      });
+      };
+      const resolved = resolveModelFromAuthorizer(ambiguousNotifications, tableMetadata, options);
       expect(resolved).toBe("bekko-v1");
     });
 
@@ -238,12 +248,13 @@ describe("Vector Type Schema and Dynamic Model Resolution Contracts (docs/spec/v
       const ambiguousNotifications: AuthorizerNotification[] = [
         { actionCode: 31, arg1: "embedding" }
       ];
+      const options: ModelResolutionOptions = {
+        explicitModel: undefined,
+        defaultModel: undefined,
+        activeModels: ["ruri-v3", "bekko-v1"]
+      };
       expect(() => {
-        resolveModelFromAuthorizer(ambiguousNotifications, tableMetadata, {
-          explicitModel: undefined,
-          defaultModel: undefined,
-          activeModels: ["ruri-v3", "bekko-v1"]
-        });
+        resolveModelFromAuthorizer(ambiguousNotifications, tableMetadata, options);
       }).toThrow("E_MODEL_UNBOUND");
     });
   });
