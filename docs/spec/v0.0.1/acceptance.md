@@ -81,7 +81,7 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
 
 ## 4. 公式 API 互換 (9 デモ)
 
-固定公式リポジトリ commit `ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a` の全 9 デモを実行し、表示行が一致することを確認する。
+固定公式リポジトリ commit `ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a` の全 9 デモを実行し、表示行が一致することを確認する。詳細な検証手順および Parcel 等のバンドラー対応の配慮事項は [sqlite-wasm-compat.md](sqlite-wasm-compat.md) を参照すること。
 
 | demo | bundler | 期待される表示行 |
 | :--- | :---: | :--- |

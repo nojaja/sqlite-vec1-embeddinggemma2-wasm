@@ -14,6 +14,7 @@ SQLite公式API、vec1とEmbeddingGemma 2を統合するpackageの設計です�
 | [acceptance.md](acceptance.md) | 単体・integration・E2Eの合格条件 |
 | [assets.md](assets.md) | 外部資材の入手URLと保存先 |
 | [embedding-quality.md](embedding-quality.md) | G03埋め込み品質ゲート手順（元モデル・ONNX FP32・Q4比較ベクトル準備と検証） |
+| [sqlite-wasm-compat.md](sqlite-wasm-compat.md) | 公式9デモ互換検証手順（Vite/Webpack/Parcel/Rsbuild対応） |
 | [linux-toolchain.md](linux-toolchain.md) | Linux再生成環境の準備（Emscripten/ホストdeb依存） |
 
 公開package名は `@nojaja/sqlite-vec1-embeddinggemma2-wasm`、versionは `0.0.1` です。`@sqlite.org/sqlite-wasm` の完全なドロップイン互換（drop-in replacement）として設計され、利用者が `package.json` の依存先を切り替えるだけで、通常SQL・vec1仮想テーブルに加えてベクトル埋め込みカスタム関数群が即座に利用可能となります。npm公開設定（`publishConfig.access: "public"`）、パッケージ内相対パス解決、メインスレッド制約の緩和、ブラウザ推論正式接続、および公式TypeScript型定義との完全互換を提供します。TypeScript/CommonJSを用い、browserにはESMを生成します。SQLite/vec1はC静的組み込み再生成Wasm、推論backendはWasm既定で明示選択（DirectML、WebGPU）し、自動fallbackは行いません。
