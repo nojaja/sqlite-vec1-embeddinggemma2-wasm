@@ -1,8 +1,9 @@
 import { VectorError } from "../errors";
 
 /**
- * 処理名: テーブル列情報行インターフェース
+ * 処理名: テーブル列情報行インターフェース。
  * 処理概要: PRAGMA table_info の 1 行の構造を表す。
+ * 実装理由: PRAGMA 実行結果行の型安全性を確保するため。
  */
 export interface TableColumnInfoRow {
   cid: number;
@@ -14,51 +15,59 @@ export interface TableColumnInfoRow {
 }
 
 /**
- * 処理名: VECTOR 列メタデータインターフェース
+ * 処理名: VECTOR 列メタデータインターフェース。
+ * 処理概要: VECTOR 型カラムのテーブル名・カラム名・次元・モデル名を保持する。
+ * 実装理由: 型安全なスキーマメタデータ参照を提供するため。
  */
 export interface VectorColumnMetadata {
   tableName: string;
   columnName: string;
   dimension: number;
-  modelName?: string;
+  modelName?: string | undefined;
 }
 
 /**
- * 処理名: モデルプロファイル定義インターフェース
+ * 処理名: モデルプロファイル定義インターフェース。
+ * 処理概要: アプリケーションから動的に提供されるモデル設定を保持する。
+ * 実装理由: 組み込みカタログに制約されない柔軟なモデル定義を可能にするため。
  */
 export interface ModelProfileDefinition {
   name: string;
   path: string;
   dimension: number;
-  normalize?: boolean;
+  normalize?: boolean | undefined;
   prefix?: {
-    query?: string;
-    document?: string;
-  };
+    query?: string | undefined;
+    document?: string | undefined;
+  } | undefined;
 }
 
 /**
- * 処理名: Authorizer 通知インターフェース
+ * 処理名: Authorizer 通知インターフェース。
+ * 処理概要: SQLite Authorizer コールバック通知の構造を定義する。
+ * 実装理由: SQL 実行時のカラムアクセスおよび関数呼び出しシーケンスを追跡するため。
  */
 export interface AuthorizerNotification {
   actionCode: number;
-  arg1?: string;
-  arg2?: string;
-  arg3?: string;
-  arg4?: string;
+  arg1?: string | undefined;
+  arg2?: string | undefined;
+  arg3?: string | undefined;
+  arg4?: string | undefined;
 }
 
 /**
- * 処理名: モデル解決オプションインターフェース
+ * 処理名: モデル解決オプションインターフェース。
+ * 処理概要: モデル自動解決処理への入力パラメータを定義する。
+ * 実装理由: exactOptionalPropertyTypes 環境下で明示指定・デフォルト値・アクティブモデル群を型安全に渡すため。
  */
 export interface ModelResolutionOptions {
-  explicitModel?: string;
-  defaultModel?: string;
-  activeModels?: string[];
+  explicitModel?: string | undefined;
+  defaultModel?: string | undefined;
+  activeModels?: string[] | undefined;
 }
 
 /**
- * 処理名: VECTOR 型宣言パース
+ * 処理名: VECTOR 型宣言パース。
  * 処理概要: 型宣言文字列から次元数および任意のモデル名を抽出する。
  * 実装理由: Lemon パーサーが受け入れた VECTOR(dimension, 'model') 等の宣言型からスキーマ情報を取得するため。
  * @param typeStr - 型宣言文字列。
@@ -66,7 +75,7 @@ export interface ModelResolutionOptions {
  */
 export function parseVectorTypeDeclaration(
   typeStr: string
-): { dimension: number; modelName?: string } | null {
+): { dimension: number; modelName?: string | undefined } | null {
   if (typeof typeStr !== "string") return null;
 
   const match = typeStr.match(/^VECTOR\s*\(\s*(-?\d+)\s*(?:,\s*['"]?([a-zA-Z0-9_\-.]+)['"]?\s*)?\)$/i);
@@ -83,8 +92,9 @@ export function parseVectorTypeDeclaration(
 }
 
 /**
- * 処理名: PRAGMA table_info からの VECTOR 列メタデータ抽出
+ * 処理名: PRAGMA table_info からの VECTOR 列メタデータ抽出。
  * 処理概要: PRAGMA table_info の全行から VECTOR 型のカラムのみを抽出し、メタデータ辞書を構築する。
+ * 実装理由: データベーステーブル定義から VECTOR 列情報を自動収集するため。
  * @param tableName - 対象テーブル名。
  * @param pragmaRows - PRAGMA table_info の行配列。
  * @returns カラム名をキーとする VectorColumnMetadata 辞書。
@@ -111,13 +121,58 @@ export function extractVectorColumnsFromTableInfo(
 }
 
 /**
- * 処理名: Authorizer 通知およびコンテキストからのモデル自動解決
+ * 処理名: カラムコンテキストからのモデル特定。
+ * 処理概要: 明示的カラムコンテキストからメタデータを参照してモデル名を検索する。
+ * 実装理由: 認知的複雑度を低減しコンテキスト解決責務を分離するため。
+ * @param tableMetadata - テーブル別 VECTOR 列メタデータ辞書。
+ * @param context - 任意の実行コンテキスト。
+ * @param context.tableName - 任意のテーブル名。
+ * @param context.columnName - 任意のカラム名。
+ * @returns 特定されたモデル名、または未解決の場合は undefined。
+ */
+function resolveFromContext(
+  tableMetadata: Record<string, Record<string, VectorColumnMetadata>>,
+  context?: { tableName?: string; columnName?: string }
+): string | undefined {
+  if (!context?.tableName || !context?.columnName) {
+    return undefined;
+  }
+  return tableMetadata[context.tableName]?.[context.columnName]?.modelName;
+}
+
+/**
+ * 処理名: Authorizer 通知シーケンスからのモデル特定。
+ * 処理概要: SQLITE_UPDATE 通知シーケンスからメタデータを参照してモデル名を検索する。
+ * 実装理由: 認知的複雑度を低減し通知解決責務を分離するため。
+ * @param notifications - Authorizer 通知配列。
+ * @param tableMetadata - テーブル別 VECTOR 列メタデータ辞書。
+ * @returns 特定されたモデル名、または未解決の場合は undefined。
+ */
+function resolveFromNotifications(
+  notifications: AuthorizerNotification[],
+  tableMetadata: Record<string, Record<string, VectorColumnMetadata>>
+): string | undefined {
+  for (const n of notifications) {
+    if (n.actionCode === 9 && n.arg1 && n.arg2) {
+      const meta = tableMetadata[n.arg1]?.[n.arg2];
+      if (meta?.modelName) {
+        return meta.modelName;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 処理名: Authorizer 通知およびコンテキストからのモデル自動解決。
  * 処理概要: 優先順位 (1.明示的指定, 2.代入先カラム, 3.単一アクティブモデル, 4.デフォルトモデル) に従って推論モデルを解決する。
  * 実装理由: SQL 関数呼び出し時にモデル引数が省略された場合でも、安全かつ決定論的に対象モデルを特定するため。
  * @param notifications - クエリ実行中に Authorizer が受け取った通知配列。
  * @param tableMetadata - テーブル別 VECTOR 列メタデータ辞書。
  * @param options - モデル解決オプション。
  * @param context - 任意の実行コンテキスト (テーブル名・カラム名)。
+ * @param context.tableName - 任意のテーブル名。
+ * @param context.columnName - 任意のカラム名。
  * @returns 解決されたモデル名。
  */
 export function resolveModelFromAuthorizer(
@@ -132,21 +187,13 @@ export function resolveModelFromAuthorizer(
   }
 
   // 2. Destination column context (context または Authorizer 通知から解決)
-  if (context?.tableName && context?.columnName) {
-    const meta = tableMetadata[context.tableName]?.[context.columnName];
-    if (meta?.modelName) {
-      return meta.modelName;
-    }
+  const contextModel = resolveFromContext(tableMetadata, context);
+  if (contextModel) {
+    return contextModel;
   }
-
-  // Authorizer notification sequence からの検索 (SQLITE_UPDATE: 9, SQLITE_INSERT: 18)
-  for (const n of notifications) {
-    if (n.actionCode === 9 && n.arg1 && n.arg2) {
-      const meta = tableMetadata[n.arg1]?.[n.arg2];
-      if (meta?.modelName) {
-        return meta.modelName;
-      }
-    }
+  const notifModel = resolveFromNotifications(notifications, tableMetadata);
+  if (notifModel) {
+    return notifModel;
   }
 
   // 3. Resolves model from single active model in DB when column context is absent
