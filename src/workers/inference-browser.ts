@@ -1,3 +1,4 @@
+import { VectorError } from "../errors";
 import {
   BrowserInferenceController,
   type BrowserControllerHost,
@@ -30,8 +31,7 @@ export async function createBrowserEngine(init: BrowserControllerInitialization)
   const opfsStorage = await createBrowserOpfsPersistentCacheStorage();
   const reader = createBrowserModelReader(
     init.manifest.assets as ModelAssetDigest[],
-    init.modelBaseUrl,
-    new URL(workerUrl).origin
+    init.modelBaseUrl
   );
   const persistentCache = new PersistentModelCache({
     storage: opfsStorage,

@@ -38,20 +38,22 @@ export function isSecureBrowserUrl(parsedUrl: URL): boolean {
 
 /**
  * 処理名: ブラウザモデルリーダー生成
- * 処理概要: マニフェスト資材、ベース URL、期待オリジンを検証し、サイズ・ハッシュ検証付きの reader 関数を返す。
- * 実装理由: オリジン越えや未検証モデルのブラウザ読み込みを完全排除するため。
+ * 処理概要: マニフェスト資材およびベース URL を検証し、CORS・サイズ・ハッシュ検証付きの reader 関数を返す。
+ * 実装理由: 外部 CDN からのオンデマンドモデル取得を許可しつつ、未検証や危険な URL からの読み込みを完全に排除するため。
  * @param assets - 許可されるモデル資材一覧。
  * @param baseUrl - モデル資材のベース URL。
- * @param expectedOrigin - パッケージ提供元の期待オリジン。
+ * @param expectedOriginOrFetcher - 互換用の期待オリジンまたは fetch 関数。
  * @param fetcher - fetch 関数 (省略時はグローバル fetch)。
  * @returns 資材読み出し非同期関数。
  */
 export function createBrowserModelReader(
   assets: readonly ModelAssetDigest[],
   baseUrl: string,
-  expectedOrigin: string,
+  expectedOriginOrFetcher?: string | typeof fetch,
   fetcher: typeof fetch = fetch
 ): (logicalPath: string) => Promise<Uint8Array | undefined> {
+  const activeFetcher = typeof expectedOriginOrFetcher === "function" ? expectedOriginOrFetcher : fetcher;
+
   if (!baseUrl.endsWith("/")) {
     throw new VectorError("E_ASSET_INTEGRITY");
   }
@@ -67,10 +69,6 @@ export function createBrowserModelReader(
     throw new VectorError("E_ASSET_INTEGRITY");
   }
 
-  if (parsed.origin !== expectedOrigin) {
-    throw new VectorError("E_ASSET_INTEGRITY");
-  }
-
   const assetMap = new Map<string, ModelAssetDigest>();
   for (const a of assets) {
     assetMap.set(a.path, a);
@@ -83,10 +81,14 @@ export function createBrowserModelReader(
     }
 
     const targetUrl = `${baseUrl}${logicalPath}`;
-    const res = await fetcher(targetUrl, {
+    const res = await activeFetcher(targetUrl, {
+      mode: "cors",
       cache: "no-store",
       credentials: "omit"
     });
+    if (!res.ok) {
+      throw new VectorError("E_ASSET_INTEGRITY");
+    }
 
     const ab = await res.arrayBuffer();
     const bytes = new Uint8Array(ab);

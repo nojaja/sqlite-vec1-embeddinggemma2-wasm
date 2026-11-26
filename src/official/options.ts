@@ -26,6 +26,8 @@ export interface ModelOptions {
 export interface EmbeddingOptions {
   model?: ModelOptions;
   backend?: "wasm" | "webgpu" | "directml";
+  workerUrl?: string;
+  manifestUrl?: string;
   initTimeoutMs?: number;
   sqlTimeoutMs?: number;
   models?: Record<string, unknown>;
@@ -38,6 +40,8 @@ export interface EmbeddingOptions {
 export interface ValidatedEmbeddingOptions {
   model: ModelOptions;
   backend: "wasm" | "webgpu" | "directml";
+  workerUrl?: string;
+  manifestUrl?: string;
   initTimeoutMs: number;
   sqlTimeoutMs: number;
   models?: Record<string, unknown>;
@@ -116,9 +120,18 @@ export function validateEmbeddingOptions(
   const initTimeoutMs = validateTimeout(options.initTimeoutMs, 600000);
   const sqlTimeoutMs = validateTimeout(options.sqlTimeoutMs, 120000);
 
+  if (options.workerUrl !== undefined && (typeof options.workerUrl !== "string" || options.workerUrl.trim().length === 0)) {
+    throw new VectorError("E_INPUT");
+  }
+  if (options.manifestUrl !== undefined && (typeof options.manifestUrl !== "string" || options.manifestUrl.trim().length === 0)) {
+    throw new VectorError("E_INPUT");
+  }
+
   return {
     model,
     backend,
+    workerUrl: options.workerUrl,
+    manifestUrl: options.manifestUrl,
     initTimeoutMs,
     sqlTimeoutMs,
     models: options.models,

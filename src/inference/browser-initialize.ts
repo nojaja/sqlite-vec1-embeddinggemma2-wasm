@@ -65,7 +65,7 @@ export async function prepareBrowserInference(
     throw new VectorError("E_ASSET_INTEGRITY");
   }
 
-  if (workerParsed.origin !== modelBaseParsed.origin) {
+  if (!options.modelBaseUrl.endsWith("/")) {
     throw new VectorError("E_ASSET_INTEGRITY");
   }
 
