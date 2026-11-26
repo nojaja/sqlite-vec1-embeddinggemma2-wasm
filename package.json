@@ -2,17 +2,27 @@
   "name": "@nojaja/sqlite-vec1-embeddinggemma2-wasm",
   "version": "0.0.1",
   "description": "SQLite official vec1 and EmbeddingGemma 2 with WebAssembly runtimes",
-  "keywords": ["sqlite", "sqlite-wasm", "vector-search", "embeddings", "typescript"],
+  "keywords": [
+    "sqlite",
+    "sqlite-wasm",
+    "vector-search",
+    "embeddings",
+    "typescript"
+  ],
   "private": false,
   "type": "commonjs",
   "main": "./dist/index.bundle.js",
   "types": "./dist/index.d.ts",
-  "publishConfig": { "access": "public" },
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nojaja/sqlite-vec1-embeddinggemma2-wasm.git"
   },
-  "bugs": { "url": "https://github.com/nojaja/sqlite-vec1-embeddinggemma2-wasm/issues" },
+  "bugs": {
+    "url": "https://github.com/nojaja/sqlite-vec1-embeddinggemma2-wasm/issues"
+  },
   "homepage": "https://github.com/nojaja/sqlite-vec1-embeddinggemma2-wasm#readme",
   "exports": {
     ".": {
@@ -25,13 +35,29 @@
       },
       "default": "./dist/node/index.js"
     },
-    "./browser": { "types": "./dist/index-browser.d.ts", "default": "./dist/index-browser.mjs" },
-    "./node": { "types": "./dist/index.d.ts", "import": "./dist/node/index.mjs", "require": "./dist/node/index.js", "default": "./dist/node/index.js" },
+    "./browser": {
+      "types": "./dist/index-browser.d.ts",
+      "default": "./dist/index-browser.mjs"
+    },
+    "./node": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/node/index.mjs",
+      "require": "./dist/node/index.js",
+      "default": "./dist/node/index.js"
+    },
     "./sqlite3.wasm": "./dist/sqlite3.wasm",
     "./package.json": "./package.json"
   },
-  "engines": { "node": ">=24 <25" },
-  "files": ["dist", "manifests", "README.md", "LICENSE", "samples"],
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "files": [
+    "dist",
+    "manifests",
+    "README.md",
+    "LICENSE",
+    "samples"
+  ],
   "allowScripts": {
     "@parcel/watcher@2.6.0": false,
     "@swc/core@1.16.21": false,
@@ -94,6 +120,7 @@
     "html-webpack-plugin": "5.6.8",
     "image-size": "2.0.4",
     "jest": "30.5.2",
+    "onnx-proto": "8.0.1",
     "onnxruntime-node": "1.31.1",
     "onnxruntime-web": "1.31.0-dev.20260914-8d85527a0",
     "parcel": "2.16.4",
@@ -111,6 +138,8 @@
   "overrides": {
     "minimatch": "11.0.4",
     "glob": "14.0.3",
-    "@istanbuljs/load-nyc-config": { "js-yaml": "4.3.2" }
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "4.3.2"
+    }
   }
 }
