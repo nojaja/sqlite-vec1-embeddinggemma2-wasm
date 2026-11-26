@@ -11,6 +11,7 @@ const assetSha256 = "3793b84e2d7ad43c12597a0b7311e3140743b02d1a56a0ca46a99c311ff
  * @param baseUrl - model資材root URL。
  * @param body - fetchが返すbytes。
  * @param expectedOrigin - packageを提供する期待origin。
+ * @param status - HTTPレスポンスステータスコード。
  * @returns readerとfetch mock。
  */
 function browserReaderFixture(baseUrl = "https://example.test/models/fixed/", body = assetBytes, expectedOrigin = "https://example.test", status = 200) {
