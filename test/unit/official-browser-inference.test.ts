@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { MODEL_ASSET_FILES, MODEL_ID, MODEL_REPOSITORY, MODEL_REVISION } from "../../src/runtime-assets/model-contract";
 import { validateEmbeddingOptions } from "../../src/official/options";
-import { initializeOfficialRuntime } from "../../src/official/initialize";
 import * as browserInference from "../../src/official/browser-inference";
 
 const dummyBytes = new Uint8Array([1, 2, 3]);
@@ -34,21 +33,54 @@ function setupBrowserGlobals(behavior: "ready" | "failed" | "timeout") {
   const port1PostMock = jest.fn();
   const listeners = new Map<string, Set<(ev: unknown) => void>>();
 
+  /**
+   * 処理名: モック Worker クラス
+   * 処理概要: Web Worker のメッセージ送受信と終了を模擬する。
+   * 実装理由: Node.js 環境で Worker 起動プロトコルを単体検証するため。
+   */
   class FakeWorker {
     public readonly url: string;
     public readonly options: unknown;
+    /**
+     * 処理名: FakeWorker コンストラクタ
+     * 処理概要: URL とオプションを保持する。
+     * 実装理由: 起動パラメータの検証のため。
+     * @param url - Worker URL。
+     * @param options - Worker オプション。
+     */
     constructor(url: string, options?: unknown) {
       this.url = url;
       this.options = options;
       lastWorker = this;
     }
+    /**
+     * 処理名: イベントリスナー登録
+     * 処理概要: リスナーを登録する。
+     * 実装理由: ready/failed 通知のテスト配送のため。
+     * @param type - イベント種別。
+     * @param cb - コールバック。
+     */
     addEventListener(type: string, cb: (ev: unknown) => void) {
       if (!listeners.has(type)) listeners.set(type, new Set());
       listeners.get(type)!.add(cb);
     }
+    /**
+     * 処理名: イベントリスナー解除
+     * 処理概要: リスナーを解除する。
+     * 実装理由: クリーンアップ動作の検証のため。
+     * @param type - イベント種別。
+     * @param cb - コールバック。
+     */
     removeEventListener(type: string, cb: (ev: unknown) => void) {
       listeners.get(type)?.delete(cb);
     }
+    /**
+     * 処理名: メッセージ送信模擬
+     * 処理概要: initialize 受信時に規定の応答をマイクロタスクで返す。
+     * 実装理由: 非同期初期化シーケンスを再現するため。
+     * @param msg - 送信メッセージ。
+     * @param transfer - 転送オブジェクト。
+     */
     postMessage(msg: unknown, transfer?: unknown) {
       postedToWorker.push({ msg, transfer });
       const data = msg as { kind?: string };
@@ -61,12 +93,22 @@ function setupBrowserGlobals(behavior: "ready" | "failed" | "timeout") {
         });
       }
     }
+    /**
+     * 処理名: Worker 終了模擬
+     * 処理概要: terminate 呼び出しを記録する。
+     * 実装理由: 解放処理の検証のため。
+     */
     terminate() {
       terminateMock();
     }
   }
 
   let lastWorker: FakeWorker | null = null;
+  /**
+   * 処理名: モック MessageChannel クラス
+   * 処理概要: port1 と port2 を提供する。
+   * 実装理由: MessageChannel 転送を単体テストで再現するため。
+   */
   class FakeMessageChannel {
     port1 = { postMessage: port1PostMock, close: port1CloseMock, start: jest.fn(), onmessage: null };
     port2 = { start: jest.fn(), close: jest.fn(), onmessage: null };
@@ -77,10 +119,21 @@ function setupBrowserGlobals(behavior: "ready" | "failed" | "timeout") {
   globalThis.fetch = jest.fn(async () => new Response(JSON.stringify(validManifest), { status: 200 })) as unknown as typeof fetch;
 
   return {
+    /**
+     * 処理名: 最終起動 Worker 取得
+     * 処理概要: 生成された FakeWorker を返す。
+     * 実装理由: 起動 URL 検証のため。
+     * @returns FakeWorker インスタンス。
+     */
     getWorker: () => lastWorker,
     postedToWorker,
     terminateMock,
     port1CloseMock,
+    /**
+     * 処理名: グローバルモック復元
+     * 処理概要: 差し替えたグローバルオブジェクトを元に戻す。
+     * 実装理由: 他テストへの副作用を防ぐため。
+     */
     restore() {
       (globalThis as Record<string, unknown>).Worker = origWorker;
       (globalThis as Record<string, unknown>).MessageChannel = origChannel;
