@@ -34,10 +34,13 @@ browserには `sqlite3Worker1Promiser` named exportもある。標準Worker1は�
 type Backend = "wasm" | "webgpu" | "directml";
 interface EmbeddingOptions {
   backend?: Backend;
-  model: { network: "allow" | "offline"; baseUrl?: string };
-  cacheDirectory?: string;
+  model?: { network: "allow" | "offline"; baseUrl?: string; cacheDirectory?: string };
+  workerUrl?: string;
+  manifestUrl?: string;
   initTimeoutMs?: number;
   sqlTimeoutMs?: number;
+  models?: Record<string, unknown>;
+  defaultModel?: string;
 }
 type ProductInitOptions = Record<string, unknown> & {
   embedding?: EmbeddingOptions;
@@ -72,11 +75,11 @@ declare function sqlite3InitModule(
 
 Nodeの他OS・architecture・major版は `E_ENVIRONMENT`。未知backend、`auto`、`gpu`、`dml`は `E_INPUT`。browserのWebGPU対応は実adapter/device取得を必要とし、`navigator.gpu`の存在だけで合格にしない。Chrome、macOS、ARM、NPU、CUDA、複数GPUは保証対象ではない。
 
-`network`は厳密にallow/offline。baseUrlはHTTPSまたはlocalhost・127.0.0.1・[::1]のHTTP、末尾 `/` 必須、userinfo/query/fragment禁止。browserのモデルbaseはpackage entryと同一originに限定する。Nodeの既定取得元は固定ONNX repository/revisionのresolve directory。環境変数でモデルIDやrevisionを差し替えない。
+`network`は厳密にallow/offline。`baseUrl`はHTTPSまたはlocalhost・127.0.0.1・[::1]のHTTP、末尾 `/` 必須、userinfo/query/fragment禁止。Node・browserともに既定取得元は固定ONNX repository/revisionのresolve directory（`https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/daa72c51243991dfcaf9f9137d2c573d8f7790c0/`）とし、browser環境でも上記安全URL契約を満たす外部CDN（クロスオリジン）からのオンデマンドモデル取得を許可する（取得全11資材のSHA-256・バイトサイズ照合により完全性を担保する）。一方、browserの推論Worker・ORT Wasm・コーデックWasm等の実行資材は`entryUrl`基準または明示`workerUrl`（安全なURL・相対URL解決可）から解決する。環境変数でモデルIDやrevisionを差し替えない。
 
 初期化期限は600000ms、SQL期限は120000msが既定。いずれも有限数かつ閉区間 `[1,1800000]`。現行validatorは整数に限定しない。nullish値は既定に展開する。範囲外、NaN、Infinityは `E_INPUT`。
 
-公式loader初期化後に推論sessionを準備する。モデル・codecとquery/image warm-upが成功するまでinitializerをresolveしない。ブラウザ環境においてはダミースタブではなく本物の推論エンジン／ワーカー（`InferenceBrowserController`）と正式接続し、実推論パイプラインを確立する。推論有効moduleは専用推論Worker/sessionを一組所有し、同moduleの接続で使う。異なるmodule・Workerへ共有しない。同時推論は1。モデル共有poolは提供しない。
+公式loader初期化後に推論sessionを準備する。ブラウザ版エントリ（`src/official/browser.ts`）においても、`initializeOfficialRuntime` の第4引数（`prepareInference`）へ `createBrowserInferenceSession` を必ず接続し、専用推論Worker（`dist/workers/inference-browser.mjs` / `InferenceBrowserController`）・OPFS永続キャッシュ（`.svw-models`）・実推論エンジンを確立する。モデル・codecとquery/image warm-upが成功するまでinitializerをresolveしない。推論有効moduleは専用推論Worker/sessionを一組所有し、同moduleの接続で使う。異なるmodule・Workerへ共有しない。同時推論は1。モデル共有poolは提供しない。なお、SQLiteの同期UDF（`embedding()` / `embedding_query()`）は内部で `Atomics.wait` を用いるため、ブラウザ環境で同期UDFを実行するDB ownerはWeb Worker上で動作する前提とし、メインスレッド上で同期推論UDFを呼び出した場合は `Atomics.wait` 不可のため `E_ENVIRONMENT` を送出する。
 
 ### 3.4 接続と終了
 

@@ -13,8 +13,8 @@ const assetSha256 = "3793b84e2d7ad43c12597a0b7311e3140743b02d1a56a0ca46a99c311ff
  * @param expectedOrigin - packageを提供する期待origin。
  * @returns readerとfetch mock。
  */
-function browserReaderFixture(baseUrl = "https://example.test/models/fixed/", body = assetBytes, expectedOrigin = "https://example.test") {
-  const fetcher = jest.fn().mockResolvedValue(new Response(body, { status: 200 }));
+function browserReaderFixture(baseUrl = "https://example.test/models/fixed/", body = assetBytes, expectedOrigin = "https://example.test", status = 200) {
+  const fetcher = jest.fn().mockResolvedValue(new Response(body, { status }));
   const reader = createBrowserModelReader(
     [{ path: "onnx/model_q4.onnx", bytes: assetBytes.byteLength, sha256: assetSha256 }],
     baseUrl,
@@ -35,7 +35,7 @@ async function verifyBrowserAssetRead(): Promise<void> {
   const result = await fixture.reader("onnx/model_q4.onnx");
   expect(result).toEqual(assetBytes);
   expect(result).not.toBe(assetBytes);
-  expect(fixture.fetcher).toHaveBeenCalledWith("https://example.test/models/fixed/onnx/model_q4.onnx", expect.objectContaining({ cache: "no-store", credentials: "omit" }));
+  expect(fixture.fetcher).toHaveBeenCalledWith("https://example.test/models/fixed/onnx/model_q4.onnx", expect.objectContaining({ mode: "cors", cache: "no-store", credentials: "omit" }));
   await expect(fixture.reader("onnx/audio_encoder_q4.onnx")).resolves.toBeUndefined();
 }
 
@@ -50,15 +50,18 @@ async function verifyBrowserAssetIntegrity(): Promise<void> {
   await expect(wrongSize.reader("onnx/model_q4.onnx")).rejects.toEqual(new VectorError("E_ASSET_INTEGRITY"));
   const wrongHash = browserReaderFixture(undefined, new Uint8Array(assetBytes.byteLength));
   await expect(wrongHash.reader("onnx/model_q4.onnx")).rejects.toEqual(new VectorError("E_ASSET_INTEGRITY"));
+  const notFound = browserReaderFixture(undefined, new Uint8Array(0), undefined, 404);
+  await expect(notFound.reader("onnx/model_q4.onnx")).rejects.toEqual(new VectorError("E_ASSET_INTEGRITY"));
 }
 
 /**
- * 処理名: browser URL境界拒否
- * 処理概要: cross-origin rootと認証情報を含むrootをfetch前に拒否する。
- * 実装理由: model取得先を任意network endpointへ変更させないため。
+ * 処理名: browser URL境界検証
+ * 処理概要: 外部HTTPS CDNを許可しつつ、認証情報を含むrootや非HTTPSをfetch前に拒否する。
+ * 実装理由: CDNオンデマンド取得を許可しつつ安全なエンドポイントのみに限定するため。
  */
-function verifyBrowserUrlBoundary(): void {
-  expect(() => browserReaderFixture("https://other.test/models/")).toThrow("E_ASSET_INTEGRITY");
+async function verifyBrowserUrlBoundary(): Promise<void> {
+  const cdn = browserReaderFixture("https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/main/");
+  await expect(cdn.reader("onnx/model_q4.onnx")).resolves.toEqual(assetBytes);
   expect(() => browserReaderFixture("https://user@example.test/models/")).toThrow("E_ASSET_INTEGRITY");
   expect(() => browserReaderFixture("http://example.test/models/", assetBytes, "http://example.test")).toThrow("E_ASSET_INTEGRITY");
   expect(() => browserReaderFixture("http://127.0.0.1/models/", assetBytes, "http://127.0.0.1")).not.toThrow();
