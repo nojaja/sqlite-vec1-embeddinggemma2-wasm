@@ -43,7 +43,7 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
 | `browser-worker-controller.test.ts` | READY 前 warm-up、要求直列化、世代不一致、未知 control、manifest ヘッダ検証（非空 assets 時の `validateModelAssets` と unit fixture 空配列許容）、`inferencePort` の `start`/`close` 検証（`postMessage` 非必須）、失敗/close 後の資源回収、health |
 | `browser-worker-build.test.ts` | browser Worker/entry の Node/native 非到達、DirectML Worker の external native |
 | `browser-opfs-cache-storage.test.ts` | bounded write、atomic copy commit、path 拒否、Web Lock、abort/close |
-| `browser-model.test.ts` | HTTPS/loopback・同 origin、未知 path miss、size/hash、credentials/redirect |
+| `browser-model.test.ts` | HTTPS/loopback・クロスオリジンCDN許可・危険URL拒否、未知 path miss、HTTP非OK・size/hash検証、CORS/credentials |
 | `browser-initialize.test.ts` | 永続 cache 先行、offline fetch 0、codec 上限、WebGPU adapter 取得/失敗 |
 | `db-worker.test.ts` | 同期 3072B copy、NULL 送信なし、画像 copy、ID 1..10、cancel/timeout/遅延 |
 | `distribution-contract.test.ts` | npm 配布設定、他 dir パス解決、メインスレッド制約緩和、ブラウザ正式推論接続、TypeScript 型互換契約 |
@@ -58,7 +58,7 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
 | `node-model-cache-flow.test.ts` | persistent 初期化後だけ VerifiedModelCache 消費、再起動 offline |
 | `node-model-cache-url.test.ts` | 危険 URL 拒否、loopback integration 許可 |
 | `node-persistent-cache-storage.test.ts` | bounded lifecycle、containment/symlink、set 排他 |
-| `official-browser-assets.test.ts` | document URL 非依存、package 相対 Worker/manifest/model、同 origin と危険 URL 拒否 |
+| `official-browser-assets.test.ts` | document URL 非依存、package 相対・明示 `workerUrl`/`manifestUrl`/`modelBaseUrl` 解決、外部CDN許可と危険 URL 拒否、`prepareInference` 接続 |
 | `official-functions.test.ts` | model 検証が NULL/READY より先、型/空白/NUL、query/document/title 写像 |
 | `official-initialize.test.ts` | 公式 option 転送、embedding 省略 prepare 0、READY 待機、DB close 前拒否、pool pause だけ |
 | `official-metadata.test.ts` | 7 key 版/空間（`productVersion: "0.0.3"` 固定、`"0.0.2"` 等の拒否）、一致、backend 非保存、未知 schema/混在拒否 |

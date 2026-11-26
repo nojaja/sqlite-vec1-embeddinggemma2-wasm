@@ -95,9 +95,9 @@ async function verifyBrowserInitialization(): Promise<void> {
 }
 
 /**
- * 処理名: browser初期化境界拒否
- * 処理概要: model cross-originとpackage資材HTTP失敗を拒否する。
- * 実装理由: browser Worker初期化を部分資材や任意originで継続しないため。
+ * 処理名: browser初期化境界検証
+ * 処理概要: 外部HTTPS CDNのmodelBaseUrlを許可し、安全でないURLやpackage資材HTTP失敗を拒否する。
+ * 実装理由: オンデマンドCDN取得を許可しつつ、不正URLや部分資材での初期化継続を防ぐため。
  * @returns 検証完了。
  */
 async function verifyBrowserInitializationFailure(): Promise<void> {
@@ -111,7 +111,9 @@ async function verifyBrowserInitializationFailure(): Promise<void> {
     assets: browserManifestAssets(),
     fetcher: browserFetchFixture(),
     persistentCache: persistentCacheFixture().cache
-  })).rejects.toThrow("E_ASSET_INTEGRITY");
+  })).resolves.toMatchObject({
+    wasmUrl: "https://example.test/dist/ort/ort-wasm-simd-threaded.jsep.wasm"
+  });
   await expect(prepareBrowserInference({
     workerUrl: "http://example.test/dist/workers/inference-browser.mjs",
     modelBaseUrl: "http://example.test/models/fixed/",

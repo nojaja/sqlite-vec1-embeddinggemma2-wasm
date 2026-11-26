@@ -169,7 +169,7 @@ https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/daa72c512439
 
 未知keyはmiss。matchのたびにcopyとsize/hash照合を行い、Content-Lengthと定義MIMEの新しいResponseを返す。putはbounded readで同じdigestを確認するだけで、永続storeやready状態を変えない。
 
-Node fetcherはHTTPS/loopback directoryだけ、userinfo/query/fragmentを拒否する。各assetのencoded pathをroot配下へ解決し、redirect=error、credentials=omit、cache=no-store。browserはさらに同一originを要求する。codec package取得は非空かつ32MiB以下を要求し、model用hash契約と区別する。offlineはmodel download 0だが、HTML/JS/Wasm/manifest/codecのローカル配信まで不要になる意味ではない。サイト全体のservice workerは利用者責務。
+Node fetcherはHTTPS/loopback directoryだけ、userinfo/query/fragmentを拒否する。各assetのencoded pathをroot配下へ解決し、redirect=error、credentials=omit、cache=no-store。browserのモデル資材取得（`createBrowserModelReader`）も同様にHTTPS/loopback・userinfo/query/fragment禁止・末尾 `/` 必須を要求し、`fetch(targetUrl, { mode: "cors", credentials: "omit", cache: "no-store" })` によりクロスオリジンCDN（Hugging Face等）からのオンデマンド取得を許可する（HTTP応答非OK・サイズ不一致・SHA-256不一致はすべて `E_ASSET_INTEGRITY`）。一方、推論Worker・ORT Wasm・画像コーデックWasm・Transformers.jsポータブルランタイム等の実行資材は `workerUrl` 基準の同一オリジンに限定する。`src/workers/inference-browser.ts` ではキャッシュミス送出用に `VectorError` を明示インポートする。codec package取得は非空かつ32MiB以下を要求し、model用hash契約と区別する。offlineはmodel download 0だが、HTML/JS/Wasm/manifest/codecのローカル配信まで不要になる意味ではない。サイト全体のservice workerは利用者責務。
 
 ## 6. 同期bridge
 
