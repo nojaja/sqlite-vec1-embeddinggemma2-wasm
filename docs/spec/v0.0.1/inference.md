@@ -19,6 +19,18 @@
 - `normalize`: コサイン類似度向けの L2 正規化（既定: `true`）
 - `prefix`: クエリ用・文書用のプレフィックス定義（例: `embeddinggemma-2` は `task: search result | query: ` / `title: ... | text: `、`ruri-v3` は `検索クエリ: ` / `検索文書: ` 等、マニフェストまたはプロファイル定義に従う）。
 
+#### `initialize({ embedding: { models, defaultModel } })` によるマルチモデル登録・解決ルール
+1. **`models` マップの解決**:
+   - 各キーが SQL 上で指定されるモデル名（例: `'ruri-v3'`, `'embeddinggemma-2'`）となる。値が文字列の場合は `manifestUrl` として扱う。
+   - 値が `ModelConfigOptions` オブジェクトの場合、以下の優先順位でマニフェストを解決する：
+     1. `manifest`: インライン指定されたマニフェスト JSON をそのまま `validateModelManifest` で検証して使用。
+     2. `manifestUrl`: 安全な URL（またはパッケージ内 `manifests/*.json` 相対パス）から取得し検証。
+     3. インライン構成（`repository`, `revision`, `dimension`, `assets` 等）: `repository`・`revision`・`dimension`・`dtype`・`assets`（ONNX 本体および `tokenizer.json` / `config.json` 等）から実行時マニフェストを構築して検証（`bytes` / `sha256` が省略された開発・カスタム定義時は `E_ASSET_INTEGRITY` の対象外とするか、マニフェスト生成契約に従いハッシュ検証を有効化するかを `strictIntegrity` で制御可能とするが、既定マニフェストおよび公開 URL マニフェストは全資材 `bytes` / `sha256` 必須）。
+2. **`defaultModel` と既定参照モデルの自動補完**:
+   - `models` 未指定時は既定参照モデル `embeddinggemma-2` のみを登録し、`defaultModel = 'embeddinggemma-2'` とする。
+   - `models` 指定時は、`defaultModel` が明示されていればそのモデル、省略時は `'embeddinggemma-2'` が `models` に含まれていれば `'embeddinggemma-2'`、含まれない場合は `models` の先頭キーを既定モデルとする。
+   - `defaultModel` に指定されたモデル名が `models` に存在しない場合は初期化時に `VectorError("E_INPUT")` を送出する。
+
 #### 汎用マニフェストスキーマと完全性検証契約
 `manifests/` 配下のモデルマニフェスト（`embeddinggemma2-q4.json`, `ruri-v3.json` 等）およびユーザー指定の外部 URL マニフェストは、固定モデル名との一致比較ではなく、以下の構造・整合性・SHA-256 チェックサムにより検証する（いずれかの違反は `E_ASSET_INTEGRITY`）：
 1. `schemaVersion === 1`
@@ -132,7 +144,7 @@ DirectMlModelCache.matchは元VerifiedModelCacheを先に読み、vision graph�
 
 ```text
 <storage-root>/
-  sets/<artifactSetHash>/
+  models/<sanitizedModelId>/<artifactSetHash>/
     files/<manifest-relative-path>
     ready.json
     stage/state.json
@@ -140,9 +152,9 @@ DirectMlModelCache.matchは元VerifiedModelCacheを先に読み、vision graph�
     stage/ready.json
 ```
 
-model storageはDB領域から分離する。Node既定rootはLOCALAPPDATA、次にXDG_CACHE_HOME、なければhomedir/.cacheを選び、その下の `sqlite-vec1-embeddinggemma2-wasm/model`。cacheDirectoryで上書きできる。browserはOPFS root直下 `.svw-models`。
+model storageはDB領域から分離する。Node既定rootはLOCALAPPDATA、次にXDG_CACHE_HOME、なければhomedir/.cacheを選び、その下の `sqlite-vec1-embeddinggemma2-wasm/model`。cacheDirectoryで上書きできる。browserはOPFS root直下 `.svw-models`。複数モデルを併用する場合は `<sanitizedModelId>`（`modelId` の `[A-Za-z0-9._-]` 以外の文字を `_` に正規化したディレクトリ名）および `<artifactSetHash>` ごとに独立したディレクトリを保持するため、`embeddinggemma-2` と `ruri-v3` 等の複数モデルが互いに上書き・衝突することなく共存できる。
 
-PersistentModelCache constructorで全11資材、小文字64桁のartifactSetHash/manifestHash、正のsafe integer chunkSizeを検証し、manifest entryをcopy/freezeする。chunkSize既定1MiB。markerは最大64KiB、UTF-8 strict JSON、schemaVersion=1、artifactSetHash、manifestHash、順序込みassetsのpath/bytes/sha256を照合する。
+PersistentModelCache constructorで全モデル資材（1件以上の非空配列）、小文字64桁のartifactSetHash/manifestHash、modelId（省略時は既定モデル識別子）、正のsafe integer chunkSizeを検証し、manifest entryをcopy/freezeする。chunkSize既定1MiB。markerは最大64KiB、UTF-8 strict JSON、schemaVersion=1、artifactSetHash、manifestHash、順序込みassetsのpath/bytes/sha256を照合する。
 
 initializeはartifact set排他内で実行する。
 
@@ -177,6 +189,8 @@ VerifiedModelCacheは、対象モデルマニフェストの `repository` およ
 https://huggingface.co/<repository>/resolve/<revision>/<path>
 ```
 
+複数モデルを同一 Worker 内で保持・切り替える場合は、`MultiModelVerifiedCache`（モデル名または `(repository, revision)` プレフィックスごとに登録された `VerifiedModelCache` をルーティングする複合キャッシュ）を `runtime.env.customCache` へ接続する。これにより、異なるリポジトリ・リビジョンの資材が同一ランタイム内で衝突することなく読み込まれる。
+
 未知keyはmiss。matchのたびにcopyとsize/hash照合を行い、Content-Lengthと定義MIMEの新しいResponseを返す。putはbounded readで同じdigestを確認するだけで、永続storeやready状態を変えない。
 
 Node fetcherはHTTPS/loopback directoryだけ、userinfo/query/fragmentを拒否する。各assetのencoded pathをroot配下へ解決し、redirect=error、credentials=omit、cache=no-store。browserのモデル資材取得（`createBrowserModelReader`）も同様にHTTPS/loopback・userinfo/query/fragment禁止・末尾 `/` 必須を要求し、`fetch(targetUrl, { mode: "cors", credentials: "omit", cache: "no-store" })` によりクロスオリジンCDN（Hugging Face等）からのオンデマンド取得を許可する（HTTP応答非OK・サイズ不一致・SHA-256不一致はすべて `E_ASSET_INTEGRITY`）。一方、推論Worker・ORT Wasm・画像コーデックWasm・Transformers.jsポータブルランタイム等の実行資材は `workerUrl` 基準の同一オリジンに限定する。`src/workers/inference-browser.ts` ではキャッシュミス送出用に `VectorError` を明示インポートする。codec package取得は非空かつ32MiB以下を要求し、model用hash契約と区別する。offlineはmodel download 0だが、HTML/JS/Wasm/manifest/codecのローカル配信まで不要になる意味ではない。サイト全体のservice workerは利用者責務。
@@ -210,4 +224,16 @@ cancel flagは別4-byte SAB。cancel/deadline到達ではPENDINGまたはWRITING
 
 handlerは異generationのsafe integer要求を応答せず無視し、非致命falseを返す。正常結果NULLはprotocol違反。fatal IDは5/6/9/10で、WorkerをFAILEDへ進めengineを解放する。他の入力errorは同sessionの次要求を許す。session healthは4-byte SAB、READY=1、FAILED=2、CLOSED=3。cache hit前にもREADYを確認し、メッセージloopが停止中でも故障を検出する。
 
-browser controllerはinitialize/inference/closeをPromise chainに直列化し、失敗後のqueueもcatchで処理する。二重initialize、未知control、不正manifestは拒否。controllerの初期化前検証では、固定の `MODEL_ID` / `MODEL_REPOSITORY` / `MODEL_REVISION` 一致比較を行わず、汎用マニフェスト契約に基づき `schemaVersion === 1`、非空文字列の `modelId` / `repository` / `revision`、小文字64桁hexの `artifactSetHash` / `fingerprint`、`profile.dimension`（正の整数）、および `Array.isArray(manifest.assets)` を検証し、`manifest.assets.length > 0` の場合は `createEngine` 呼出し前に `validateModelAssets(manifest.assets)` で全資材の完全性を検証する。一方、`manifest.assets.length === 0`（`createEngine` をモック注入する単体テスト fixture）の場合は controller 境界では許容し、実ランタイム（`prepareBrowserInference` / `PersistentModelCache`）側で資材検証を強制する。複数モデル（`models`）が指定された場合はモデル名ごとの `InferenceEngine` マップを管理し、推論要求の `model` フィールドに応じて対象エンジンへ振り分ける（未指定時は既定エンジンを使用）。また、Worker 側の `inferencePort` は要求の受信（`onmessage`）・開始（`start()`）・終了（`close()`）のみを行い応答は `responseBuffer`（SAB）へ直接書き込むため、`inferencePort` の型検証は `typeof inferencePort.start === "function" && typeof inferencePort.close === "function"` とし、`postMessage` メソッドの存在を必須としない。READYはwarm-up後だけ。close/failureで全engineとportを閉じる。session closeの応答待ちは30000ms、そのfinallyでport/Workerを必ず終了する。
+browser controllerはinitialize/inference/closeをPromise chainに直列化し、失敗後のqueueもcatchで処理する。二重initialize、未知control、不正manifestは拒否。controllerの初期化前検証では、固定の `MODEL_ID` / `MODEL_REPOSITORY` / `MODEL_REVISION` 一致比較を行わず、汎用マニフェスト契約に基づき `schemaVersion === 1`、非空文字列の `modelId` / `repository` / `revision`、小文字64桁hexの `artifactSetHash` / `fingerprint`、`profile.dimension`（正の整数）、および `Array.isArray(manifest.assets)` を検証し、`manifest.assets.length > 0` の場合は `createEngine` 呼出し前に `validateModelAssets(manifest.assets)` で全資材の完全性を検証する。一方、`manifest.assets.length === 0`（`createEngine` をモック注入する単体テスト fixture）の場合は controller 境界では許容し、実ランタイム（`prepareBrowserInference` / `PersistentModelCache`）側で資材検証を強制する。
+
+#### ブラウザ・Node Worker におけるマルチモデル動的ロードとセッション切替
+1. **初期化ペイロード拡張**: `BrowserControllerInitialization`（および Node Worker の `initialize` ペイロード）は、単一 `manifest` に加え `models?: Record<string, { manifest, modelBaseUrl, network?, preload? }>` および `defaultModel?: string` を保持する。
+2. **モデルレジストリとオンデマンド初期化（`inference-browser.ts` / `inference-node.ts`）**:
+   - Worker 側は `Map<string, { config, engine?: InferenceEngine }>` としてモデルレジストリと `MultiModelVerifiedCache` を所有する。
+   - 初期化フェーズでは `defaultModel`（および `preload === true` のモデル）のみを即座に OPFS / Node キャッシュ準備・`InferenceEngine` 生成・ウォームアップまで完了させて `READY` を公開する。
+   - 推論要求（`handleInferenceRequest`）の `msg.model` で未ロードの登録済みモデル（例: `'ruri-v3'`）が指定された場合、Worker はその場で該当モデルの `PersistentModelCache`（OPFS `.svw-models/models/<modelId>/<artifactSetHash>/` または Node キャッシュ）を初期化・資材取得し、`MultiModelVerifiedCache` へ登録した上で `InferenceEngine` を生成・ウォームアップし、レジストリへ保持してから推論を実行する（以降の同一モデル呼び出しでは既存エンジンを再利用する）。
+   - オンデマンドロード中のキャッシュ破損・ネットワーク失敗・オフライン不足等は対応する `VectorError`（`E_ASSET_INTEGRITY`, `E_MODEL_CACHE_MISS`, `E_INFERENCE` 等）として応答へ返し、他のロード済みモデルセッションを巻き込んで破損させない。
+   - `msg.model` が登録済みモデル集合に存在しない場合は `E_INPUT` を返す。
+   - 各モデルエンジンはそのモデルの次元数（例: `ruri-v3` なら 512 次元 = 2048 バイト）の `Float32` BLOB を生成し、`publishResponse` が `header[1] = dim * 4`、`header[3] = dim` として SAB へ書き込む。
+3. **ポート検証と終了処理**:
+   - Worker 側の `inferencePort` は要求の受信（`onmessage`）・開始（`start()`）・終了（`close()`）のみを行い応答は `responseBuffer`（SAB）へ直接書き込むため、`inferencePort` の型検証は `typeof inferencePort.start === "function" && typeof inferencePort.close === "function"` とし、`postMessage` メソッドの存在を必須としない。READYはwarm-up後だけ。close/failureでレジストリ内の全engineとportを閉じる。session closeの応答待ちは30000ms、そのfinallyでport/Workerを必ず終了する。
