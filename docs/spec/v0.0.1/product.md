@@ -2,7 +2,7 @@
 
 ## 1. 製品境界
 
-製品名は `@nojaja/sqlite-vec1-embeddinggemma2-wasm`、package versionは `0.0.1`。公式 `@sqlite.org/sqlite-wasm@3.54.1-build1` に対する完全なドロップイン互換（drop-in replacement）として提供され、利用者が `package.json` の依存先を本パッケージに変更するだけで、SQLite 3.54.1、公式vec1 0.8、EmbeddingGemma 2のq4 text/visionを一つのnpm形式tarballから利用できる。SQLite/vec1は同じWasm instance、SQL接続、transactionで動作する。モデル推論を別DBで事前計算して転記する方式を主実装にしない。
+製品名は `@nojaja/sqlite-vec1-embeddinggemma2-wasm`、package versionは `0.0.1`。公式 `@sqlite.org/sqlite-wasm@3.54.1-build1` に対する完全なドロップイン互換（drop-in replacement）として提供され、利用者が `package.json` の依存先を本パッケージに変更するだけで、SQLite 3.54.1 および公式vec1 0.8を一つのnpm形式tarballから利用でき、さらにONNX埋め込みモデル（既定の参照モデル: EmbeddingGemma 2のq4 text/vision、および `ruri-v3` 等の任意モデル）をSQLite上のEmbedding UDFとして実行できる（モデル本体はtarballに同梱せず、実行時取得またはローカルキャッシュから読み込む）。SQLite/vec1は同じWasm instance、SQL接続、transactionで動作する。モデル推論を別DBで事前計算して転記する方式を主実装にしない。
 
 手書き製品・tooling・sampleはTypeScript、設定は `.js`、rootはCommonJS。browserは生成ESM、Nodeは生成CommonJSとESM wrapperを使用する。公式CAPI/VFS hook、限定上流patch、第三者資材、生成物は言語例外。独自SQL parser、tokenizer、距離・推論engineを新設しない。通常のbuild・test・sampleは任意の実験projectを取り外しても動作する。
 
