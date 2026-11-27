@@ -4,12 +4,14 @@ import { isSecureBrowserUrl } from "../runtime-assets/browser-model";
 import {
   MODEL_REPOSITORY,
   MODEL_REVISION,
+  buildInlineModelManifest,
   validateModelManifest,
   type ModelAssetDigest,
+  type ModelManifest,
   type ModelManifestProfile
 } from "../runtime-assets/model-contract";
 import { requestEmbedding, type InferenceRequestPort } from "../workers/db";
-import type { ValidatedEmbeddingOptions } from "./options";
+import type { ModelConfigOptions, ValidatedEmbeddingOptions } from "./options";
 import type { OfficialInferenceSession } from "./types";
 
 /**
@@ -229,6 +231,82 @@ function awaitBrowserWorkerReady(worker: Worker, initTimeoutMs: number): Promise
 }
 
 /**
+ * 処理名: 単一ブラウザモデル設定解決
+ * 処理概要: ModelConfigOptions または URL 文字列から BrowserManifest と取得元 URL を解決する。
+ * 実装理由: models オプションで登録された複数モデルのマニフェストを統一形式で Worker へ渡すため。
+ * @param name - 登録モデル名。
+ * @param entry - モデル設定またはマニフェスト URL。
+ * @param entryUrl - エントリ基準 URL。
+ * @param defaultBaseUrl - デフォルトモデルベース URL。
+ * @returns 解決済みモデルエントリ。
+ */
+async function resolveSingleBrowserModel(
+  name: string,
+  entry: ModelConfigOptions | string,
+  entryUrl: string,
+  defaultBaseUrl: string
+): Promise<{
+  manifest: BrowserManifest;
+  modelBaseUrl: string;
+  network?: "allow" | "offline";
+  preload?: boolean;
+}> {
+  if (typeof entry === "string") {
+    const resolved = resolveOfficialBrowserAssets(entryUrl, { manifestUrl: entry });
+    const manifest = await loadBrowserManifest(resolved.manifest);
+    return {
+      manifest,
+      modelBaseUrl: `https://huggingface.co/${manifest.repository}/resolve/${manifest.revision}/`
+    };
+  }
+  if (entry.manifest) {
+    validateModelManifest(entry.manifest, true);
+    const manifest = entry.manifest as unknown as BrowserManifest;
+    return {
+      manifest,
+      modelBaseUrl: entry.baseUrl
+        ? resolveOfficialBrowserAssets(entryUrl, { modelBaseUrl: entry.baseUrl }).modelBase
+        : `https://huggingface.co/${manifest.repository}/resolve/${manifest.revision}/`,
+      network: entry.network,
+      preload: entry.preload
+    };
+  }
+  if (entry.manifestUrl) {
+    const resolved = resolveOfficialBrowserAssets(entryUrl, {
+      manifestUrl: entry.manifestUrl,
+      modelBaseUrl: entry.baseUrl
+    });
+    const manifest = await loadBrowserManifest(resolved.manifest);
+    return {
+      manifest,
+      modelBaseUrl: entry.baseUrl ? resolved.modelBase : `https://huggingface.co/${manifest.repository}/resolve/${manifest.revision}/`,
+      network: entry.network,
+      preload: entry.preload
+    };
+  }
+  const inlineManifest = buildInlineModelManifest({
+    modelId: name,
+    repository: entry.repository,
+    revision: entry.revision,
+    dimension: entry.dimension,
+    dtype: entry.dtype,
+    vision: entry.vision,
+    maxTokens: entry.maxTokens,
+    normalize: entry.normalize,
+    prefix: entry.prefix,
+    assets: entry.assets
+  }) as unknown as BrowserManifest;
+  return {
+    manifest: inlineManifest,
+    modelBaseUrl: entry.baseUrl
+      ? resolveOfficialBrowserAssets(entryUrl, { modelBaseUrl: entry.baseUrl }).modelBase
+      : (entry.repository ? `https://huggingface.co/${inlineManifest.repository}/resolve/${inlineManifest.revision}/` : defaultBaseUrl),
+    network: entry.network,
+    preload: entry.preload
+  };
+}
+
+/**
  * 処理名: ブラウザ推論セッション生成
  * 処理概要: ブラウザ推論ワーカーを起動し、CDN/OPFS モデルキャッシュ準備と同期ブリッジを接続したセッションを構築する。
  * 実装理由: ブラウザ単体でオンデマンド CDN 取得・OPFS 永続キャッシュ・高速ベクトル検索を完結させるため。
@@ -253,7 +331,31 @@ export async function createBrowserInferenceSession(
     workerUrl: options.workerUrl,
     manifestUrl: options.manifestUrl
   });
-  const manifest = await loadBrowserManifest(assets.manifest);
+  const defaultManifest = await loadBrowserManifest(assets.manifest);
+  const resolvedModels: Record<string, { manifest: BrowserManifest; modelBaseUrl: string; network?: "allow" | "offline"; preload?: boolean }> = {};
+  const modelInfos: Record<string, { dimension: number; dtype: string; loaded: boolean }> = {};
+
+  if (options.models) {
+    for (const [name, cfg] of Object.entries(options.models)) {
+      const resolved = await resolveSingleBrowserModel(name, cfg, entryUrl, assets.modelBase);
+      resolvedModels[name] = resolved;
+      const prof = (resolved.manifest as unknown as { profile?: ModelManifestProfile }).profile;
+      modelInfos[name] = {
+        dimension: prof?.dimension ?? 768,
+        dtype: prof?.dtype ?? "q4",
+        loaded: false
+      };
+    }
+  }
+  const defaultModelName = options.defaultModel ?? (options.models ? Object.keys(options.models)[0]! : "embeddinggemma-2");
+  const primaryEntry = resolvedModels[defaultModelName];
+  const manifest = primaryEntry ? primaryEntry.manifest : defaultManifest;
+  if (!modelInfos[defaultModelName]) {
+    const prof = (manifest as unknown as { profile?: ModelManifestProfile }).profile;
+    modelInfos[defaultModelName] = { dimension: prof?.dimension ?? 768, dtype: prof?.dtype ?? "q4", loaded: true };
+  } else {
+    modelInfos[defaultModelName]!.loaded = true;
+  }
 
   const healthBuffer = new SharedArrayBuffer(4);
   const cancellationBuffer = new SharedArrayBuffer(4);
@@ -266,8 +368,10 @@ export async function createBrowserInferenceSession(
       generation: 1,
       backend: options.backend,
       network: options.model.network,
-      modelBaseUrl: assets.modelBase,
+      modelBaseUrl: primaryEntry ? primaryEntry.modelBaseUrl : assets.modelBase,
       manifest,
+      models: Object.keys(resolvedModels).length > 0 ? resolvedModels : undefined,
+      defaultModel: defaultModelName,
       inferencePort: channel.port2,
       healthBuffer
     },
@@ -351,7 +455,8 @@ export async function createBrowserInferenceSession(
       dtype: (manifest as unknown as { profile?: ModelManifestProfile }).profile?.dtype ?? "q4",
       dimension: (manifest as unknown as { profile?: ModelManifestProfile }).profile?.dimension ?? 768,
       backend: options.backend,
-      fingerprint: manifest.fingerprint
+      fingerprint: manifest.fingerprint,
+      models: modelInfos
     }
   };
 }

@@ -22,21 +22,21 @@ export type EmbeddableEngine = {
 export type EngineResolver =
   | EmbeddableEngine
   | ReadonlyMap<string, EmbeddableEngine>
-  | ((model?: string) => EmbeddableEngine | undefined);
+  | ((model?: string) => EmbeddableEngine | Promise<EmbeddableEngine | undefined> | undefined);
 
 /**
  * 処理名: 推論エンジン解決
- * 処理概要: 単一エンジン、Map、またはリゾルバ関数から要求モデルに対応するエンジンを取得する。
+ * 処理概要: 単一エンジン、Map、または同期/非同期リゾルバ関数から要求モデルに対応するエンジンを取得する。
  * @param engineOrResolver - エンジンまたは解決手段。
  * @param model - 要求モデル名。
  * @returns 対象の推論エンジン、または未解決時 undefined。
  */
-function resolveTargetEngine(
+async function resolveTargetEngine(
   engineOrResolver: EngineResolver,
   model?: string
-): EmbeddableEngine | undefined {
+): Promise<EmbeddableEngine | undefined> {
   if (typeof engineOrResolver === "function") {
-    return engineOrResolver(model);
+    return await engineOrResolver(model);
   }
   if (engineOrResolver instanceof Map) {
     if (model !== undefined) {
@@ -108,7 +108,7 @@ export async function handleInferenceRequest(
 
   try {
     const requestedModel = typeof msg.model === "string" ? msg.model : undefined;
-    const targetEngine = resolveTargetEngine(engine, requestedModel);
+    const targetEngine = await resolveTargetEngine(engine, requestedModel);
     if (!targetEngine) {
       publishResponse(responseBuffer, new Uint8Array(0), 1);
       return false;

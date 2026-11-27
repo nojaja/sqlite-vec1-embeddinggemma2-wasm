@@ -162,3 +162,59 @@ export class VerifiedModelCache {
     }
   }
 }
+
+/**
+ * 処理名: MultiModelVerifiedCache クラス
+ * 処理概要: 複数モデルの VerifiedModelCache を登録・保持し、リクエスト URL に応じて適切なキャッシュへルーティングする。
+ * 実装理由: 同一 Worker 内で異なるリポジトリ・リビジョンの複数モデルを衝突なく読み込むため。
+ */
+export class MultiModelVerifiedCache {
+  private readonly caches: VerifiedModelCache[] = [];
+
+  /**
+   * 処理名: モデルキャッシュ登録
+   * 処理概要: 個別モデル用の VerifiedModelCache をレジストリへ追加する。
+   * 実装理由: 起動時およびオンデマンドロード時に利用可能なモデルキャッシュを順次登録するため。
+   * @param cache - 登録する VerifiedModelCache インスタンス。
+   */
+  public register(cache: VerifiedModelCache): void {
+    if (!this.caches.includes(cache)) {
+      this.caches.push(cache);
+    }
+  }
+
+  /**
+   * 処理名: マルチモデルキャッシュ検索
+   * 処理概要: 登録された各 VerifiedModelCache へ順に問い合わせ、最初に一致した Response を返す。
+   * 実装理由: モデルごとに異なるプレフィックスを単一の customCache インターフェースで解決するため。
+   * @param request - リクエスト文字列または Request。
+   * @returns 一致した Response、または undefined。
+   */
+  public async match(request: string | Request): Promise<Response | undefined> {
+    for (const cache of this.caches) {
+      const res = await cache.match(request);
+      if (res !== undefined) {
+        return res;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * 処理名: マルチモデルキャッシュ格納検証
+   * 処理概要: リクエストに対応する登録キャッシュへ put を委譲する。
+   * 実装理由: 不正なレスポンス書き込みを既存の完全性検証で拒否するため。
+   * @param request - 格納先リクエストキー。
+   * @param response - 格納対象 Response。
+   */
+  public async put(request: string | Request, response: Response): Promise<void> {
+    for (const cache of this.caches) {
+      const hit = await cache.match(request).catch(() => undefined);
+      if (hit !== undefined) {
+        await cache.put(request, response);
+        return;
+      }
+    }
+    throw new VectorError("E_ASSET_INTEGRITY");
+  }
+}

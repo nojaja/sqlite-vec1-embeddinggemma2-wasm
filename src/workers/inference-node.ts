@@ -9,6 +9,8 @@ import { verifyDirectMlInstallation } from "../inference/backends/directml";
 import { initializeInferenceEngine, warmupImageBytes } from "../inference/initialize";
 import { prepareNodeModelCache } from "../sqlite/node-model-cache";
 import { DirectMlModelCache } from "../inference/backends/directml-vision-graph";
+import { MultiModelVerifiedCache, VerifiedModelCache } from "../runtime-assets/verified-cache";
+import { MODEL_REPOSITORY, type ModelAssetDigest, type ModelManifestProfile } from "../runtime-assets/model-contract";
 import { handleInferenceRequest } from "./inference";
 import { publishInferenceHealth, HEALTH_READY, HEALTH_FAILED, HEALTH_CLOSED } from "../bridge/inference-health";
 import type { PortableRuntime, InferenceEngine } from "../inference/engine";
@@ -16,6 +18,16 @@ import type { PortableRuntime, InferenceEngine } from "../inference/engine";
 // DirectML 実行環境検証および external 参照保持のため静的参照
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import * as _ortNode from "onnxruntime-node";
+
+/**
+ * 処理名: Node マルチモデルエントリ初期化型
+ */
+export interface NodeModelEntryInit {
+  manifest: unknown;
+  modelBaseUrl?: string;
+  network?: "allow" | "offline";
+  preload?: boolean;
+}
 
 /**
  * 処理名: Node 推論初期化オプション
@@ -31,10 +43,15 @@ export interface NodeInferenceWorkerInitialization {
   inferencePort?: MessagePort;
   healthBuffer?: SharedArrayBuffer;
   manifest?: unknown;
+  models?: Record<string, NodeModelEntryInit>;
+  defaultModel?: string;
   codecs?: import("../inference/image-codecs").ImageCodecBytes;
 }
 
-let engine: InferenceEngine | null = null;
+const nodeEngines = new Map<string, InferenceEngine>();
+const nodeModelConfigs = new Map<string, NodeInferenceWorkerInitialization>();
+const sharedMultiModelCache = new MultiModelVerifiedCache();
+let defaultNodeModelName = "embeddinggemma-2";
 let currentGeneration = 0;
 let activeHealthBuffer: SharedArrayBuffer | undefined;
 let isClosing = false;
@@ -64,19 +81,33 @@ async function initializeNodeWorker(init: NodeInferenceWorkerInitialization): Pr
     runtime = require(portableRuntimePath) as PortableRuntime;
   }
 
+  let modelRepo: string | undefined;
+  let modelRev: string | undefined;
+  let manifestProfile: ModelManifestProfile | undefined;
+
   if (!cache) {
     const manifestPath = resolve("manifests/embeddinggemma2-q4.json");
-    let manifestData: { artifactSetHash: string; revision: string; assets: import("../runtime-assets/model-contract").ModelAssetDigest[] };
+    let manifestData: {
+      modelId?: string;
+      repository?: string;
+      artifactSetHash: string;
+      revision: string;
+      profile?: ModelManifestProfile;
+      assets: ModelAssetDigest[];
+    };
     let manifestHash: string;
 
     if (init.manifest && typeof init.manifest === "object") {
-      manifestData = init.manifest as any;
+      manifestData = init.manifest as typeof manifestData;
       manifestHash = crypto.createHash("sha256").update(JSON.stringify(manifestData)).digest("hex");
     } else {
       const manifestBytes = fs.readFileSync(manifestPath);
       manifestData = JSON.parse(manifestBytes.toString("utf8"));
       manifestHash = crypto.createHash("sha256").update(manifestBytes).digest("hex");
     }
+    modelRepo = manifestData.repository;
+    modelRev = manifestData.revision;
+    manifestProfile = manifestData.profile;
 
     let effectiveCacheDir = init.cacheDirectory;
     if (!effectiveCacheDir) {
@@ -93,13 +124,13 @@ async function initializeNodeWorker(init: NodeInferenceWorkerInitialization): Pr
 
     // オフライン実行時、未キャッシュかつローカルにモデル資材が存在する場合は安全に初期シードする
     const readyFile = resolve(effectiveCacheDir, "sets", manifestData.artifactSetHash, "ready.json");
-    if (!fs.existsSync(readyFile)) {
+    if (!fs.existsSync(readyFile) && (!modelRepo || modelRepo === MODEL_REPOSITORY)) {
       const seedRoot = resolve("model", "embeddinggemma-2-ONNX", manifestData.revision);
       if (fs.existsSync(seedRoot)) {
         const filesDir = resolve(effectiveCacheDir, "sets", manifestData.artifactSetHash, "files");
         fs.mkdirSync(filesDir, { recursive: true });
         for (const asset of manifestData.assets) {
-          const srcFile = resolve(seedRoot, (asset as any).source ?? path.basename(asset.path));
+          const srcFile = resolve(seedRoot, (asset as { source?: string }).source ?? path.basename(asset.path));
           const dstFile = resolve(filesDir, asset.path);
           fs.mkdirSync(path.dirname(dstFile), { recursive: true });
           if (fs.existsSync(srcFile) && !fs.existsSync(dstFile)) {
@@ -118,7 +149,14 @@ async function initializeNodeWorker(init: NodeInferenceWorkerInitialization): Pr
       artifactSetHash: manifestData.artifactSetHash,
       manifestHash
     });
-    cache = backend === "directml" ? new DirectMlModelCache(preparedCache) : preparedCache;
+    if (backend === "directml") {
+      cache = new DirectMlModelCache(preparedCache);
+    } else if (preparedCache instanceof VerifiedModelCache) {
+      sharedMultiModelCache.register(preparedCache);
+      cache = sharedMultiModelCache;
+    } else {
+      cache = preparedCache;
+    }
   }
 
   let codecs = init.codecs;
@@ -145,10 +183,74 @@ async function initializeNodeWorker(init: NodeInferenceWorkerInitialization): Pr
     wasmUrl,
     factoryUrl,
     codecs,
-    warmupImage: warmupImageBytes()
+    warmupImage: warmupImageBytes(),
+    modelRepository: modelRepo,
+    modelRevision: modelRev,
+    dtype: manifestProfile?.dtype,
+    dimension: manifestProfile?.dimension,
+    vision: manifestProfile?.vision,
+    maxTokens: manifestProfile?.maxTokens,
+    prefix: manifestProfile?.prefix
   });
 
   return eng;
+}
+
+/**
+ * 処理名: Node マルチモデル初期登録・ロード
+ * 処理概要: models マップを登録し、defaultModel および preload 指定モデルを起動時にロードする。
+ * 実装理由: Node Worker でも複数モデルのオンデマンド動的ロードとセッション切替を実現するため。
+ * @param init - 初期化パラメーター。
+ */
+async function initializeAllNodeModels(init: NodeInferenceWorkerInitialization): Promise<void> {
+  nodeEngines.clear();
+  nodeModelConfigs.clear();
+
+  if (init.models && Object.keys(init.models).length > 0) {
+    const keys = Object.keys(init.models);
+    defaultNodeModelName = init.defaultModel ?? keys[0]!;
+    for (const name of keys) {
+      const entry = init.models[name]!;
+      nodeModelConfigs.set(name, {
+        ...init,
+        manifest: entry.manifest,
+        modelBaseUrl: entry.modelBaseUrl ?? init.modelBaseUrl,
+        network: entry.network ?? init.network
+      });
+    }
+    for (const [name, cfg] of nodeModelConfigs.entries()) {
+      if (name === defaultNodeModelName || init.models[name]?.preload === true) {
+        nodeEngines.set(name, await initializeNodeWorker(cfg));
+      }
+    }
+    return;
+  }
+
+  defaultNodeModelName = init.defaultModel ?? "embeddinggemma-2";
+  nodeModelConfigs.set(defaultNodeModelName, init);
+  nodeEngines.set(defaultNodeModelName, await initializeNodeWorker(init));
+}
+
+/**
+ * 処理名: Node 推論エンジン動的解決
+ * 処理概要: ロード済みエンジンを返し、未ロードの登録モデルならオンデマンドでロードして返す。
+ * 実装理由: embedding(text, model) で指定されたモデルを動的に切り替えて推論するため。
+ * @param modelName - 要求モデル名。
+ * @returns 推論エンジン、または未登録時 undefined。
+ */
+async function resolveOrLoadNodeEngine(modelName?: string): Promise<InferenceEngine | undefined> {
+  const target = modelName ?? defaultNodeModelName;
+  const existing = nodeEngines.get(target);
+  if (existing) {
+    return existing;
+  }
+  const cfg = nodeModelConfigs.get(target);
+  if (!cfg) {
+    return undefined;
+  }
+  const created = await initializeNodeWorker(cfg);
+  nodeEngines.set(target, created);
+  return created;
 }
 
 /**
@@ -158,9 +260,13 @@ async function initializeNodeWorker(init: NodeInferenceWorkerInitialization): Pr
  */
 function attachInferencePort(port: { on(event: "message", listener: (msg: unknown) => void): void; onmessage?: ((e: MessageEvent<unknown>) => void) | null }): void {
   const handler = async (msg: unknown) => {
-    if (isClosing || !engine) return;
+    if (isClosing || nodeEngines.size === 0) return;
     const data = (msg && typeof msg === "object" && "data" in msg) ? (msg as { data: unknown }).data : msg;
-    const isFatal = await handleInferenceRequest(engine, data, currentGeneration);
+    const isFatal = await handleInferenceRequest(
+      (modelName) => resolveOrLoadNodeEngine(modelName),
+      data,
+      currentGeneration
+    );
     if (isFatal) {
       publishInferenceHealth(activeHealthBuffer, HEALTH_FAILED);
       if (parentPort) {
@@ -185,14 +291,14 @@ async function closeWorker(): Promise<void> {
   if (isClosing) return;
   isClosing = true;
   publishInferenceHealth(activeHealthBuffer, HEALTH_CLOSED);
-  if (engine) {
+  for (const eng of nodeEngines.values()) {
     try {
-      await engine.close();
+      await eng.close();
     } catch {
       // 無視
     }
-    engine = null;
   }
+  nodeEngines.clear();
 }
 
 // 親ポートが存在する場合のリスナー設定
@@ -204,7 +310,7 @@ if (parentPort) {
     if (message.kind === "initialize") {
       try {
         const init = message as unknown as NodeInferenceWorkerInitialization;
-        engine = await initializeNodeWorker(init);
+        await initializeAllNodeModels(init);
         publishInferenceHealth(activeHealthBuffer, HEALTH_READY);
 
         const targetPort = init.inferencePort ?? parentPort!;
@@ -238,7 +344,7 @@ if (parentPort) {
     (async () => {
       try {
         const init = workerData as NodeInferenceWorkerInitialization;
-        engine = await initializeNodeWorker(init);
+        await initializeAllNodeModels(init);
         publishInferenceHealth(activeHealthBuffer, HEALTH_READY);
 
         const targetPort = init.inferencePort ?? parentPort!;

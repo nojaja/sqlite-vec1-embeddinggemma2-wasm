@@ -9,8 +9,9 @@ import { initializeInferenceEngine, warmupImageBytes } from "../inference/initia
 import type { PortableRuntime, InferenceEngine } from "../inference/engine";
 import { createBrowserOpfsPersistentCacheStorage } from "../runtime-assets/browser-opfs-cache-storage";
 import { PersistentModelCache } from "../runtime-assets/persistent-model-cache";
+import { MultiModelVerifiedCache, VerifiedModelCache } from "../runtime-assets/verified-cache";
 import { createBrowserModelReader } from "../runtime-assets/browser-model";
-import type { ModelAssetDigest, ModelManifestProfile } from "../runtime-assets/model-contract";
+import { MODEL_REPOSITORY, type ModelAssetDigest, type ModelManifestProfile } from "../runtime-assets/model-contract";
 
 /**
  * 処理名: ブラウザ推論ワーカー識別名
@@ -19,20 +20,20 @@ import type { ModelAssetDigest, ModelManifestProfile } from "../runtime-assets/m
  */
 export const WORKER_NAME = "inference-browser";
 
+const sharedMultiModelCache = new MultiModelVerifiedCache();
+
 /**
  * 処理名: ブラウザ推論エンジン生成
  * 処理概要: OPFS 永続キャッシュ、アセット準備、ランタイム動的インポート、GPU 設定を経て推論エンジンを初期化する。
- * 実装理由: ブラウザ Worker 内で完結したゼロ構成の推論パイプラインを確立するため。
+ * 実装理由: ブラウザ Worker 内で完結したゼロ構成・マルチモデル対応の推論パイプラインを確立するため。
  * @param init - 初期化パラメーター。
  * @returns 初期化済み推論エンジン。
  */
 export async function createBrowserEngine(init: BrowserControllerInitialization): Promise<InferenceEngine> {
   const workerUrl = typeof location !== "undefined" ? location.href : "https://localhost/dist/workers/inference-browser.mjs";
   const opfsStorage = await createBrowserOpfsPersistentCacheStorage();
-  const reader = createBrowserModelReader(
-    init.manifest.assets as ModelAssetDigest[],
-    init.modelBaseUrl
-  );
+  const assets = init.manifest.assets as ModelAssetDigest[];
+  const reader = createBrowserModelReader(assets, init.modelBaseUrl);
   const persistentCache = new PersistentModelCache({
     storage: opfsStorage,
     fetcher: async (asset: ModelAssetDigest): Promise<Response> => {
@@ -42,9 +43,11 @@ export async function createBrowserEngine(init: BrowserControllerInitialization)
       }
       return new Response(bytes, { status: 200 });
     },
-    assets: init.manifest.assets as ModelAssetDigest[],
+    assets,
     artifactSetHash: init.manifest.artifactSetHash,
-    manifestHash: init.manifest.fingerprint
+    manifestHash: init.manifest.fingerprint,
+    modelId: init.manifest.modelId,
+    strictAllowlist: init.manifest.repository === MODEL_REPOSITORY
   });
 
   const prepared = await prepareBrowserInference({
@@ -54,9 +57,20 @@ export async function createBrowserEngine(init: BrowserControllerInitialization)
     network: init.network,
     artifactSetHash: init.manifest.artifactSetHash,
     manifestHash: init.manifest.fingerprint,
-    assets: init.manifest.assets as ModelAssetDigest[],
+    assets,
     persistentCache
   });
+
+  const modelVerifiedCache = new VerifiedModelCache(
+    assets,
+    (path) => persistentCache.read(path),
+    {
+      repository: init.manifest.repository,
+      revision: init.manifest.revision,
+      strictAllowlist: init.manifest.repository === MODEL_REPOSITORY
+    }
+  );
+  sharedMultiModelCache.register(modelVerifiedCache);
 
   const runtimeUrl = new URL("../vendor/transformers-portable.mjs", workerUrl).href;
   const runtime = (await import(/* @vite-ignore */ runtimeUrl)) as unknown as PortableRuntime;
@@ -66,7 +80,7 @@ export async function createBrowserEngine(init: BrowserControllerInitialization)
   const manifestProfile = (init.manifest as unknown as { profile?: ModelManifestProfile }).profile;
   return initializeInferenceEngine(runtime, {
     backend: init.backend,
-    cache: prepared.cache,
+    cache: sharedMultiModelCache,
     wasmUrl: prepared.wasmUrl,
     factoryUrl: prepared.factoryUrl,
     codecs: prepared.codecs,

@@ -233,3 +233,65 @@ export function validateModelManifest(manifest: unknown, allowEmptyAssets = fals
     validateModelAssets(m.assets, { strictAllowlist: strict });
   }
 }
+
+/**
+ * 処理名: インラインモデルマニフェスト構築入力型
+ * 処理概要: ユーザーが models オプションで渡すインライン設定からマニフェストを組み立てるための入力型。
+ * 実装理由: ruri-v3 等の任意モデルを外部 JSON ファイルなしでも登録可能にするため。
+ */
+export interface InlineManifestInput {
+  modelId: string;
+  repository?: string;
+  revision?: string;
+  dimension?: number;
+  dtype?: string;
+  vision?: boolean;
+  maxTokens?: number;
+  normalize?: boolean;
+  prefix?: { query?: string; document?: string };
+  assets?: readonly (string | { path: string; bytes?: number; sha256?: string; role?: string })[];
+}
+
+/**
+ * 処理名: インラインモデルマニフェスト構築
+ * 処理概要: リポジトリ・リビジョン・次元数・資材リストから汎用 ModelManifest 構造を生成する。
+ * 実装理由: browser-inference と node-inference で共通のインラインモデル解決を提供するため。
+ * @param input - インラインモデル設定。
+ * @returns 構築された ModelManifest。
+ */
+export function buildInlineModelManifest(input: InlineManifestInput): ModelManifest {
+  const repository = input.repository?.trim() || input.modelId;
+  const revision = input.revision?.trim() || "main";
+  const dimension = input.dimension ?? 768;
+  const dtype = input.dtype ?? "q4";
+  const zeroHash = "0".repeat(64);
+  const assets: ModelAssetDigest[] = (input.assets ?? []).map((entry) => {
+    if (typeof entry === "string") {
+      return { path: entry, bytes: 1, sha256: zeroHash };
+    }
+    return {
+      path: entry.path,
+      bytes: entry.bytes ?? 1,
+      sha256: entry.sha256 ?? zeroHash,
+      role: entry.role
+    };
+  });
+
+  return {
+    schemaVersion: 1,
+    modelId: input.modelId,
+    repository,
+    revision,
+    artifactSetHash: zeroHash,
+    fingerprint: zeroHash,
+    profile: {
+      dimension,
+      dtype,
+      vision: input.vision ?? false,
+      maxTokens: input.maxTokens,
+      normalize: input.normalize,
+      prefix: input.prefix
+    },
+    assets
+  };
+}

@@ -46,9 +46,23 @@ export interface PersistentModelCacheOptions {
   storage: PersistentCacheStorage;
   fetcher?: (asset: ModelAssetDigest) => Promise<Response>;
   chunkSize?: number;
+  modelId?: string;
+  strictAllowlist?: boolean;
 }
 
 const HASH_REGEX = /^[0-9a-f]{64}$/;
+
+/**
+ * 処理名: モデル識別子ディレクトリ名正規化
+ * 処理概要: modelId 中の英数字・ドット・アンダースコア・ハイフン以外をアンダースコアへ置換する。
+ * 実装理由: OPFS やファイルシステム上で安全なディレクトリ名を生成するため。
+ * @param modelId - モデル識別子。
+ * @returns 正規化済みディレクトリ名。
+ */
+function sanitizeModelIdForPath(modelId: string): string {
+  const sanitized = modelId.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+  return sanitized.length > 0 ? sanitized : "model";
+}
 
 /**
  * 処理名: チャンク分割書き込みヘルパー
@@ -84,6 +98,7 @@ export class PersistentModelCache {
   private readonly storage: PersistentCacheStorage;
   private readonly fetcher?: (asset: ModelAssetDigest) => Promise<Response>;
   private readonly chunkSize: number;
+  private readonly basePrefix: string;
   private isReady = false;
 
   /**
@@ -93,7 +108,8 @@ export class PersistentModelCache {
    * @param options - キャッシュオプション。
    */
   constructor(options: PersistentModelCacheOptions) {
-    validateModelAssets(options.assets);
+    const strict = options.strictAllowlist ?? (options.modelId === undefined);
+    validateModelAssets(options.assets, { strictAllowlist: strict });
     if (!HASH_REGEX.test(options.artifactSetHash) || !HASH_REGEX.test(options.manifestHash)) {
       throw new VectorError("E_ASSET_INTEGRITY");
     }
@@ -111,17 +127,20 @@ export class PersistentModelCache {
     this.storage = options.storage;
     this.fetcher = options.fetcher;
     this.chunkSize = chunk;
+    this.basePrefix = options.modelId !== undefined
+      ? `models/${sanitizeModelIdForPath(options.modelId)}/${this.artifactSetHash}`
+      : `sets/${this.artifactSetHash}`;
   }
 
   /**
    * 処理名: 既存資材完全性検証
-   * 処理概要: 公開ディレクトリ配下の全 11 資材のサイズと SHA-256 ダイジェストを照合する。
+   * 処理概要: 公開ディレクトリ配下の全資材のサイズと SHA-256 ダイジェストを照合する。
    * 実装理由: 破損資材の早期検知およびオフラインモードでの整合性保証のため。
    * @returns 全資材が完全であれば true。
    */
   private async checkAllAssetsValid(): Promise<boolean> {
     for (const asset of this.assets) {
-      const filePath = `sets/${this.artifactSetHash}/files/${asset.path}`;
+      const filePath = `${this.basePrefix}/files/${asset.path}`;
       const d = await this.storage.digest(filePath);
       if (!d || d.bytes !== asset.bytes || d.sha256.toLowerCase() !== asset.sha256.toLowerCase()) {
         return false;
@@ -141,7 +160,7 @@ export class PersistentModelCache {
       throw new VectorError("E_MODEL_CACHE_MISS");
     }
     const res = await this.fetcher(asset);
-    const stageFilePath = `sets/${this.artifactSetHash}/stage/files/${asset.path}`;
+    const stageFilePath = `${this.basePrefix}/stage/files/${asset.path}`;
     const writer = await this.storage.createWriter(stageFilePath);
 
     try {
@@ -188,7 +207,7 @@ export class PersistentModelCache {
    */
   public async initialize(mode: ModelCacheMode): Promise<void> {
     await this.storage.runExclusive(this.artifactSetHash, async () => {
-      const readyPath = `sets/${this.artifactSetHash}/ready.json`;
+      const readyPath = `${this.basePrefix}/ready.json`;
       const readyExists = await this.storage.exists(readyPath);
 
       if (readyExists) {
@@ -210,7 +229,7 @@ export class PersistentModelCache {
         throw new VectorError("E_MODEL_CACHE_MISS");
       }
 
-      const stageStatePath = `sets/${this.artifactSetHash}/stage/state.json`;
+      const stageStatePath = `${this.basePrefix}/stage/state.json`;
       if (await this.storage.exists(stageStatePath)) {
         throw new VectorError("E_ASSET_INTEGRITY");
       }
@@ -228,7 +247,7 @@ export class PersistentModelCache {
           await this.fetchAndStageAsset(asset);
         }
 
-        const readyWriter = await this.storage.createWriter(`sets/${this.artifactSetHash}/stage/ready.json`);
+        const readyWriter = await this.storage.createWriter(`${this.basePrefix}/stage/ready.json`);
         await writeInChunks(
           readyWriter,
           new TextEncoder().encode(
@@ -247,15 +266,15 @@ export class PersistentModelCache {
         }
         for (const asset of this.assets) {
           await this.storage.commit(
-            `sets/${this.artifactSetHash}/stage/files/${asset.path}`,
-            `sets/${this.artifactSetHash}/files/${asset.path}`
+            `${this.basePrefix}/stage/files/${asset.path}`,
+            `${this.basePrefix}/files/${asset.path}`
           );
         }
         await this.storage.commit(
-          `sets/${this.artifactSetHash}/stage/ready.json`,
+          `${this.basePrefix}/stage/ready.json`,
           readyPath
         );
-        await this.storage.removeTree(`sets/${this.artifactSetHash}/stage`);
+        await this.storage.removeTree(`${this.basePrefix}/stage`);
         this.isReady = true;
       } catch (err) {
         throw new VectorError("E_ASSET_INTEGRITY");
@@ -270,7 +289,7 @@ export class PersistentModelCache {
    */
   public async recover(): Promise<void> {
     await this.storage.runExclusive(this.artifactSetHash, async () => {
-      await this.storage.removeTree(`sets/${this.artifactSetHash}/stage`);
+      await this.storage.removeTree(`${this.basePrefix}/stage`);
       this.isReady = false;
     });
   }
@@ -289,6 +308,6 @@ export class PersistentModelCache {
     if (!this.isReady) {
       throw new VectorError("E_MODEL_CACHE_MISS");
     }
-    return this.storage.read(`sets/${this.artifactSetHash}/files/${path}`);
+    return this.storage.read(`${this.basePrefix}/files/${path}`);
   }
 }
