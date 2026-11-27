@@ -22,6 +22,10 @@ jobs:
           node-version: 24.x
           registry-url: https://registry.npmjs.org/
       - run: npm ci --ignore-scripts
+      - name: Download SQLite build inputs
+        run: node scripts/download-assets.mjs --skip-model
+      - name: Build official SQLite Wasm runtime
+        run: npm run build:sqlite
       - run: npm run build
       - name: Publish to npm with Trusted Publishing
         run: npm publish --access public

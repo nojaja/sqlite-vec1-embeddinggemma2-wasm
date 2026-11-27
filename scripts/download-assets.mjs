@@ -255,6 +255,8 @@ async function ensureVec1Source(item) {
  * 処理概要: docs/spec/v0.0.1/assets.md に従い、全資材の整合性検証および取得を行う。
  */
 async function main() {
+  const skipModel = process.argv.includes("--skip-model");
+
   console.log("=== 1. Checking sqlite-official runtime assets ===");
   const officialDir = path.resolve("downloads/sqlite-official");
   fs.mkdirSync(officialDir, { recursive: true });
@@ -283,22 +285,26 @@ async function main() {
   await ensureVec1Source(VEC1_ITEM);
 
   console.log("\n=== 3. Downloading EmbeddingGemma 2 Model assets (manifest-driven) ===");
-  const manifestAbsPath = path.resolve(MANIFEST_PATH);
-  if (!fs.existsSync(manifestAbsPath)) {
-    console.warn(`[WARN] Model manifest not found at ${manifestAbsPath}. Skipping manifest-driven model downloads.`);
+  if (skipModel) {
+    console.log("Skipping model download (--skip-model specified).");
   } else {
-    const manifest = JSON.parse(fs.readFileSync(manifestAbsPath, "utf-8"));
-    const repoName = manifest.repository.includes("/") ? manifest.repository.split("/")[1] : manifest.repository;
-    const modelDir = path.join("model", repoName, manifest.revision);
-    console.log(`Target Model Directory: ${modelDir}`);
-    console.log(`Repository: ${manifest.repository}`);
-    console.log(`Revision: ${manifest.revision}`);
+    const manifestAbsPath = path.resolve(MANIFEST_PATH);
+    if (!fs.existsSync(manifestAbsPath)) {
+      console.warn(`[WARN] Model manifest not found at ${manifestAbsPath}. Skipping manifest-driven model downloads.`);
+    } else {
+      const manifest = JSON.parse(fs.readFileSync(manifestAbsPath, "utf-8"));
+      const repoName = manifest.repository.includes("/") ? manifest.repository.split("/")[1] : manifest.repository;
+      const modelDir = path.join("model", repoName, manifest.revision);
+      console.log(`Target Model Directory: ${modelDir}`);
+      console.log(`Repository: ${manifest.repository}`);
+      console.log(`Revision: ${manifest.revision}`);
 
-    for (const asset of manifest.assets) {
-      const fileName = path.basename(asset.path);
-      const targetPath = path.join(modelDir, fileName);
-      const url = `https://huggingface.co/${manifest.repository}/resolve/${manifest.revision}/${asset.path}`;
-      await ensureFile(targetPath, url, asset.sha256, asset.bytes);
+      for (const asset of manifest.assets) {
+        const fileName = path.basename(asset.path);
+        const targetPath = path.join(modelDir, fileName);
+        const url = `https://huggingface.co/${manifest.repository}/resolve/${manifest.revision}/${asset.path}`;
+        await ensureFile(targetPath, url, asset.sha256, asset.bytes);
+      }
     }
   }
 
