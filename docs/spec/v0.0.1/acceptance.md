@@ -6,7 +6,7 @@
 
 検証は以下の順序で進行する：
 1. **固定資材の配置点検と完全性ロック**: `node scripts/download-assets.mjs`（`manifests/embeddinggemma2-q4.json` 不在時は内部で `scripts/assets/lock-model.ts` を自動実行）および `npm run lock-assets` により、全 11 モデル資材、正準マニフェスト（`manifests/embeddinggemma2-q4.json`）、公式 SQLite/vec1 ビルド入力資材、および Debian bookworm ツールチェーン `.deb` パッケージ群（77 + 13 個）の存在と完全性を確認・ロックする。
-2. **製品ビルド**: `npm run build` により、推論バンドル・公式 SQLite 資材・製品エントリポイント・型定義が欠落なく生成されることを確認する。
+2. **製品ビルド**: `npm run build` により、推論バンドル・公式 SQLite 資材（`dist/sqlite3-opfs-async-proxy.js` および `dist/workers/sqlite3-opfs-async-proxy.js` の双方を含む）・製品エントリポイント・型定義が欠落なく生成されることを確認する。
 3. **実資材統合試験ゲート (G05)**: 製品モジュール（`src/runtime-assets/model-contract`、`src/sqlite/node-model-cache`）連携のもと `npm run test:assets` を実行し、実モデルのオンライン取得、オフラインキャッシュ、破損拒否・修復、並行取得排他が PASS することを確認する。
 4. **単体テストスイート**: `npm test` により、36 ファイル・208 テストすべてが PASS することを確認する。
 5. **統合テスト・機能ゲート**:
@@ -110,7 +110,7 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
 3. **ブラウザ WebGPU 実推論・メインスレッド Promiser (`test/e2e/browser-inference.test.ts`)**:
    - MS Edge ブラウザ環境で WebGPU アダプター/デバイスが正常に取得され、テキストクエリおよび画像埋め込みの実推論が完了すること。
    - ブラウザメインスレッドから `initialize({ embedding })` を直接呼び出した場合に初期化時点で `E_ENVIRONMENT` が送出されること。
-   - ブラウザメインスレッドから `sqlite3EmbeddingWorkerPromiser({ embedding })` を呼び出し、Dedicated Worker 内の `embedding()` / `embedding_query()` / `DISTANCE()` を含む SQL 実行および `shutdown` が正常完了すること。
+   - ブラウザメインスレッドから `sqlite3EmbeddingWorkerPromiser({ embedding })` を呼び出し、Dedicated Worker 内の `embedding()` / `embedding_query()` / `DISTANCE()` を含む SQL 実行および `shutdown` が正常完了すること。また、`dist/workers/db-browser.mjs` 起動時に `sqlite3-opfs-async-proxy.js` の 404 / MIME type エラーによる OPFS / OPFS-WL VFS 初期化失敗が発生しないこと。
 4. **仕様契約クエリ実推論 (`test/e2e/vector-contract-query.test.ts`)**:
    - `VECTOR(768 , 'embeddinggemma-2') STRICT` テーブル定義が Lemon 文法解析および STRICT 列型検証を通過し、TypeScript 側での置換なしにネイティブ・透過的に作成されること。
    - `PRAGMA table_info` および `sqlite_schema` において型宣言文字列 `VECTOR(768 , 'embeddinggemma-2')` が完全保持されること。

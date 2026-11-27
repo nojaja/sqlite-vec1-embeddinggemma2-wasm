@@ -75,6 +75,7 @@
 [2/5] 公式 SQLite 資材の dist/ へのコピーおよびローダーパッチ適用
   ├─ sqlite3.wasm (SQLite 3.54.1 + vec1 0.8)
   ├─ 公式ローダー群 (sqlite3-node.mjs, sqlite3-bundler-friendly.mjs 等 7 ファイル)
+  ├─ dist/workers/sqlite3-opfs-async-proxy.js (db-browser.mjs の import.meta.url 相対解決向け同梱)
   └─ dist/sqlite3-node.mjs への条件付き patches/sqlite-official.patch 適用 ("Array.isArray(text)" 未適用時)
 [3/5] 製品エントリポイントおよびサンプルのバンドル (esbuild 全 11 エントリ)
   ├─ dist/index.bundle.js (汎用メイン CJS)
@@ -291,9 +292,12 @@ esbuild で CJS 形式でバンドルする際、以下の設定を施す：
 - `banner: { js: "const __svw_import_meta_url = require('node:url').pathToFileURL(__filename).href;\nconst __svw_import_meta = { url: __svw_import_meta_url };" }`
 これにより、CJS 環境下でも `import.meta.url` および `import.meta` が常に有効な `file:///` URL として動作する。
 
-### 5.3 Wasm ファイル配置と自動検出 (`locateFile`)
+### 5.3 Wasm ファイルおよび OPFS 非同期プロキシ Worker の配置と自動検出 (`locateFile`)
 `dist/sqlite3.wasm` はパッケージルートおよび各エントリポイントから参照される。
 `src/official/node.ts` の `locateFile` オプションにより、カレントディレクトリ、`dist/`、またはモジュール相対パスから実在する絶対パスを自動検出して SQLite ランタイムへ渡す。
+
+また、`dist/workers/db-browser.mjs` が内部でバンドルする公式ローダー `sqlite3-bundler-friendly.mjs` は、SQLite 公式 OPFS VFS（`opfs` / `opfs-wl`）の非同期プロキシ Worker を起動する際、`options.proxyUri` を参照せず自身の `import.meta.url` を基準とした相対パス（`new URL("sqlite3-opfs-async-proxy.js", import.meta.url)`）で解決する仕様となっている。
+このため、`scripts/build/package.ts` では `downloads/sqlite-official/sqlite3-opfs-async-proxy.js` を `dist/sqlite3-opfs-async-proxy.js`（`dist/index-browser.mjs` 等向け）だけでなく `dist/workers/sqlite3-opfs-async-proxy.js`（`dist/workers/db-browser.mjs` 向け）にも必ずコピー・同梱する。これにより、`dist/workers/` 配下を静的配信する Web アプリケーション環境でも 404 や SPA フォールバックによる MIME type エラーを防止し、`dist/reports/build-content.json` および `dist/reports/sbom.cdx.json` の監査対象にも自動的に含まれる。
 
 ### 5.4 ランタイムロック・ビルドレポート・SBOM生成 (`manifests/runtime-lock.json`, `dist/reports/`)
 ビルド工程の最終段階（`[5/5]`）において、`scripts/build/package.ts` は使用した全資材およびパッチファイルの完全性を固定するロックファイル `manifests/runtime-lock.json`（および `dist/runtime-lock.json`）を生成し、さらに以下の監査レポートを `dist/reports/` に出力する：
