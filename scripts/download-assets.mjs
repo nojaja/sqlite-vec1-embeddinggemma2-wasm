@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { execSync } from "node:child_process";
+import zlib from "node:zlib";
 import { Readable } from "node:stream";
 import { finished } from "node:stream/promises";
 
@@ -182,6 +182,69 @@ async function ensureFile(targetPath, url, expectedSha256, expectedBytes) {
 }
 
 /**
+ * 処理名: ZIP アーカイブからの単一ファイル抽出
+ * 処理概要: Node.js 標準の zlib のみを用いて ZIP の Central Directory を走査し、指定エントリを展開する。
+ * 実装理由: Linux の GNU tar が ZIP を展開できない問題や unzip コマンドの有無に依存せず、
+ *           全 OS で決定論的に ZIP からファイルを抽出するため。
+ * @param {string} zipPath - ZIP ファイルパス。
+ * @param {string} entryName - 抽出対象のアーカイブ内パス。
+ * @returns {Buffer} 展開されたファイル内容。
+ */
+function extractFileFromZip(zipPath, entryName) {
+  const buf = fs.readFileSync(zipPath);
+  // End of Central Directory (0x06054b50) を末尾から探索
+  const minOffset = Math.max(0, buf.length - 65557);
+  let eocdOffset = -1;
+  for (let i = buf.length - 22; i >= minOffset; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset === -1) {
+    throw new Error(`Invalid ZIP archive (EOCD not found): ${zipPath}`);
+  }
+
+  const totalEntries = buf.readUInt16LE(eocdOffset + 10);
+  let offset = buf.readUInt32LE(eocdOffset + 16);
+
+  for (let i = 0; i < totalEntries; i++) {
+    if (buf.readUInt32LE(offset) !== 0x02014b50) {
+      throw new Error(`Invalid Central Directory header at ${offset}`);
+    }
+    const method = buf.readUInt16LE(offset + 10);
+    const compressedSize = buf.readUInt32LE(offset + 20);
+    const nameLen = buf.readUInt16LE(offset + 28);
+    const extraLen = buf.readUInt16LE(offset + 30);
+    const commentLen = buf.readUInt16LE(offset + 32);
+    const localHeaderOffset = buf.readUInt32LE(offset + 42);
+    const name = buf.toString("utf8", offset + 46, offset + 46 + nameLen);
+
+    if (name === entryName) {
+      if (buf.readUInt32LE(localHeaderOffset) !== 0x04034b50) {
+        throw new Error(`Invalid Local File Header at ${localHeaderOffset}`);
+      }
+      const lfhNameLen = buf.readUInt16LE(localHeaderOffset + 26);
+      const lfhExtraLen = buf.readUInt16LE(localHeaderOffset + 28);
+      const dataStart = localHeaderOffset + 30 + lfhNameLen + lfhExtraLen;
+      const compressedData = buf.subarray(dataStart, dataStart + compressedSize);
+
+      if (method === 0) {
+        return Buffer.from(compressedData);
+      }
+      if (method === 8) {
+        return zlib.inflateRawSync(compressedData);
+      }
+      throw new Error(`Unsupported ZIP compression method ${method} for ${entryName}`);
+    }
+
+    offset += 46 + nameLen + extraLen + commentLen;
+  }
+
+  throw new Error(`Entry '${entryName}' not found in ZIP archive: ${zipPath}`);
+}
+
+/**
  * 処理名: vec1 C ソース調達・完全性検証
  * 処理概要: docs/spec/v0.0.1/assets.md 第2項に従い、vec1.c を配置・検証する。
  *           sqlite-src ZIP が存在する場合は内部の ext/vec1/vec1.c から抽出し、
@@ -214,13 +277,11 @@ async function ensureVec1Source(item) {
   if (fs.existsSync(zipAbsPath)) {
     console.log(`Extracting vec1.c from ${item.zipSource} (${item.zipInternalPath})...`);
     try {
-      const extractedContent = execSync(`tar -xOf "${zipAbsPath}" "${item.zipInternalPath}"`, {
-        maxBuffer: 10 * 1024 * 1024
-      });
+      const extractedContent = extractFileFromZip(zipAbsPath, item.zipInternalPath);
       fs.writeFileSync(absPath, extractedContent);
       console.log(`Extracted ${item.target} from ZIP successfully.`);
     } catch (err) {
-      console.warn(`Failed to extract vec1.c using tar: ${err.message}. Trying URL fallback...`);
+      console.warn(`Failed to extract vec1.c from ZIP: ${err.message}. Trying URL fallback...`);
     }
   }
 
@@ -255,6 +316,8 @@ async function ensureVec1Source(item) {
  * 処理概要: docs/spec/v0.0.1/assets.md に従い、全資材の整合性検証および取得を行う。
  */
 async function main() {
+  const skipModel = process.argv.includes("--skip-model");
+
   console.log("=== 1. Checking sqlite-official runtime assets ===");
   const officialDir = path.resolve("downloads/sqlite-official");
   fs.mkdirSync(officialDir, { recursive: true });
@@ -283,22 +346,26 @@ async function main() {
   await ensureVec1Source(VEC1_ITEM);
 
   console.log("\n=== 3. Downloading EmbeddingGemma 2 Model assets (manifest-driven) ===");
-  const manifestAbsPath = path.resolve(MANIFEST_PATH);
-  if (!fs.existsSync(manifestAbsPath)) {
-    console.warn(`[WARN] Model manifest not found at ${manifestAbsPath}. Skipping manifest-driven model downloads.`);
+  if (skipModel) {
+    console.log("Skipping model download (--skip-model specified).");
   } else {
-    const manifest = JSON.parse(fs.readFileSync(manifestAbsPath, "utf-8"));
-    const repoName = manifest.repository.includes("/") ? manifest.repository.split("/")[1] : manifest.repository;
-    const modelDir = path.join("model", repoName, manifest.revision);
-    console.log(`Target Model Directory: ${modelDir}`);
-    console.log(`Repository: ${manifest.repository}`);
-    console.log(`Revision: ${manifest.revision}`);
+    const manifestAbsPath = path.resolve(MANIFEST_PATH);
+    if (!fs.existsSync(manifestAbsPath)) {
+      console.warn(`[WARN] Model manifest not found at ${manifestAbsPath}. Skipping manifest-driven model downloads.`);
+    } else {
+      const manifest = JSON.parse(fs.readFileSync(manifestAbsPath, "utf-8"));
+      const repoName = manifest.repository.includes("/") ? manifest.repository.split("/")[1] : manifest.repository;
+      const modelDir = path.join("model", repoName, manifest.revision);
+      console.log(`Target Model Directory: ${modelDir}`);
+      console.log(`Repository: ${manifest.repository}`);
+      console.log(`Revision: ${manifest.revision}`);
 
-    for (const asset of manifest.assets) {
-      const fileName = path.basename(asset.path);
-      const targetPath = path.join(modelDir, fileName);
-      const url = `https://huggingface.co/${manifest.repository}/resolve/${manifest.revision}/${asset.path}`;
-      await ensureFile(targetPath, url, asset.sha256, asset.bytes);
+      for (const asset of manifest.assets) {
+        const fileName = path.basename(asset.path);
+        const targetPath = path.join(modelDir, fileName);
+        const url = `https://huggingface.co/${manifest.repository}/resolve/${manifest.revision}/${asset.path}`;
+        await ensureFile(targetPath, url, asset.sha256, asset.bytes);
+      }
     }
   }
 

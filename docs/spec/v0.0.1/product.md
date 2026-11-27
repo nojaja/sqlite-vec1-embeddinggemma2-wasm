@@ -24,7 +24,7 @@
 
 条件exportのtypesを先頭にする。root `main` は `./dist/index.bundle.js`、`types` は `./dist/index.d.ts`、Node engineは `>=24 <25`。CommonJS利用時のinitializerは `require(packageName).default`。Node ESM wrapperはCommonJSのdefaultを明示再exportし、CommonJS namespaceをinitializerとして返さない。
 
-browserには `sqlite3Worker1Promiser` named exportもある。標準Worker1は同じ製品initializerを使い、通常SQLとvec1を提供する。利用者の独自DB owner Workerによるembedding初期化とは別の経路である。
+browserには公式互換の `sqlite3Worker1Promiser` に加え、推論有効な Dedicated Worker を内包してメインスレッドから `embedding` / `embedding_query` UDF を含む SQL を非同期 RPC で安全に実行できる製品公式ラッパー `sqlite3EmbeddingWorkerPromiser` を named export として提供する。標準 Worker1（`sqlite3Worker1Promiser`）は同じ製品initializerを `embedding` なしで使い、通常SQLとvec1を提供する。利用者の独自DB owner Workerによるembedding初期化とは別の経路である。
 
 公式API・型の互換対象は `@sqlite.org/sqlite-wasm@3.54.1-build1`。供給資材内の公式 `index.d.mts` をそのまま型の基礎とし、宣言tokenを変更せず説明コメントを補足できる。公式の `Sqlite3Static`、`Database`、`PreparedStatement`、`CAPI`、`WASM_API`、`SqlValue`、`Sqlite3Result`、`ExecOptions`を再exportする。その他の公式export型も保持する。Worker1型と `OpfsDb = OpfsDatabase` の型aliasを公開する。
 
@@ -50,28 +50,50 @@ type ProductSqlite3 = Sqlite3Static & { embedding: EmbeddingControl };
 declare function sqlite3InitModule(
   options?: ProductInitOptions
 ): Promise<ProductSqlite3>;
+
+interface EmbeddingWorkerPromiserConfig {
+  embedding?: EmbeddingOptions;
+  dbWorkerUrl?: string;
+  onready?: () => void;
+  onerror?: (error: unknown) => void;
+}
+interface EmbeddingWorkerPromiserResponse {
+  type: string;
+  messageId?: string;
+  result: Record<string, unknown>;
+}
+type EmbeddingWorkerPromiser = (
+  type: string,
+  args?: Record<string, unknown>
+) => Promise<EmbeddingWorkerPromiserResponse>;
+declare function sqlite3EmbeddingWorkerPromiser(
+  config?: EmbeddingWorkerPromiserConfig
+): Promise<EmbeddingWorkerPromiser>;
 ```
 
 ## 3. 初期化
 
 ### 3.1 通常SQL
 
-`embedding`省略時は公式loaderへ残りのoptionsをそのまま渡す。公式callback、module configuration、Wasm location指定を維持する。main threadでも通常SQL、oo1、capi、vec1、DISTANCEを使える。モデル取得、codec初期化、推論Worker、metadataを作らない。SQL関数名の登録は行うため、NULL短絡と未準備診断は利用できる。
+`embedding`省略時は公式loaderへ残りのoptionsをそのまま渡す。公式callback、module configuration、Wasm location指定を維持する。main threadでも通常SQL、oo1、capi、vec1、DISTANCEを使える。モデル取得、codec初期化、推論Worker、metadataを作らない。また、`options.embedding` が有効化されていない場合（推論セッション `infer` が生成されない場合）は、`embedding` および `embedding_query` UDF を SQLite 接続へ登録せず、`DISTANCE` および `gemma_model_info()`（`{"ready":false}` を返却）のみを登録する。これにより、推論未構成のまま SQL から `embedding()` を呼び出した場合に `E_EMBEDDING_NOT_READY` で失敗するのではなく、SQLite 標準の `no such function` として即座に未有効化を検知できる。
 
 ### 3.2 パス解決契約（外部プロジェクト配置対応）
 
 本パッケージが npm 経由で他プロジェクトの `node_modules/@nojaja/sqlite-vec1-embeddinggemma2-wasm` にインストールされた場合でも安全に稼働するため、パッケージ内アセット（`manifests/embeddinggemma2-q4.json`、`dist/workers/inference-node.js`、`dist/sqlite3.wasm` 等）の解決は呼び出し元の `process.cwd()` ではなく、本パッケージ自身の配置ディレクトリ（`__dirname` または `import.meta.url`）を基準に解決する。
 
-### 3.3 推論有効化およびスレッド制約の緩和
+### 3.3 推論有効化およびスレッド制約
 
-検証順序は、embedding省略の短絡、option/model object、Node対応matrix、backend、network、base URL、期限。
-メインスレッド制約の緩和契約：利用者の利便性のため、メインスレッド（Node.js main thread、ブラウザ window / main thread）での初期化時であっても `E_ENVIRONMENT` で即時拒否せず、バックグラウンド Worker を介して推論を実行可能なアーキテクチャとする。
+検証順序は、embedding省略の短絡、実行コンテキスト制約（ブラウザメインスレッド早期検知）、option/model object、Node対応matrix、backend、network、base URL、期限。
+- **Node.js メインスレッド制約の緩和**: Node.js 環境ではメインスレッドでも `Atomics.wait` が利用可能であるため、バックグラウンド Worker（`inference-node.js`）を介して推論を実行できる。
+- **ブラウザメインスレッド実行時の早期検知**: ブラウザ環境（`env.runtime === "browser"`）において、Dedicated Worker 外（`window` コンテキスト等、`!env.worker`）で `options.embedding` が指定された場合、SQLite 同期 UDF 内の `Atomics.wait` が Web 標準仕様により `TypeError` で禁止されているため、モデルや推論 Worker を起動する前の初期化時点（`validateEmbeddingOptions`）で即座に `VectorError("E_ENVIRONMENT")` を送出する。同時に、Dedicated Worker 内での実行またはメインスレッド向けラッパー `sqlite3EmbeddingWorkerPromiser` の利用が必要である旨の明示的なガイダンス（`console.warn` 等）を出力する。
+- **ブラウザメインスレッド向け Promiser ラッパー (`sqlite3EmbeddingWorkerPromiser`)**: メインスレッドの Web アプリケーションから安全に `embedding` / `embedding_query` UDF を利用できるよう、SQLite 本体を Dedicated Worker（`dist/workers/db-browser.mjs`）に内包し、その内部から推論 Worker（`dist/workers/inference-browser.mjs`）と同期ブリッジ接続する Promiser 型 RPC ラッパーを公式エクスポートとして提供する。
 
 | 推論を行う環境 | wasm | webgpu | directml |
 | --- | --- | --- | --- |
 | Windows x64 Node.js 24 (main / worker_threads) | 既定 | 環境エラー | 明示指定のみ |
 | Linux x64 Node.js 24 (main / worker_threads) | 既定 | 環境エラー | 環境エラー |
-| 対応Edge (Window / dedicated Worker) | 既定 | 明示指定のみ | 環境エラー |
+| 対応Edge (Dedicated Worker) | 既定 | 明示指定のみ | 環境エラー |
+| 対応Edge (Window メインスレッド直接初期化) | `E_ENVIRONMENT`（`sqlite3EmbeddingWorkerPromiser` を使用） | `E_ENVIRONMENT`（`sqlite3EmbeddingWorkerPromiser` を使用） | 環境エラー |
 
 Nodeの他OS・architecture・major版は `E_ENVIRONMENT`。未知backend、`auto`、`gpu`、`dml`は `E_INPUT`。browserのWebGPU対応は実adapter/device取得を必要とし、`navigator.gpu`の存在だけで合格にしない。Chrome、macOS、ARM、NPU、CUDA、複数GPUは保証対象ではない。
 
@@ -79,7 +101,7 @@ Nodeの他OS・architecture・major版は `E_ENVIRONMENT`。未知backend、`aut
 
 初期化期限は600000ms、SQL期限は120000msが既定。いずれも有限数かつ閉区間 `[1,1800000]`。現行validatorは整数に限定しない。nullish値は既定に展開する。範囲外、NaN、Infinityは `E_INPUT`。
 
-公式loader初期化後に推論sessionを準備する。ブラウザ版エントリ（`src/official/browser.ts`）においても、`initializeOfficialRuntime` の第4引数（`prepareInference`）へ `createBrowserInferenceSession` を必ず接続し、専用推論Worker（`dist/workers/inference-browser.mjs` / `InferenceBrowserController`）・OPFS永続キャッシュ（`.svw-models`）・実推論エンジンを確立する。モデル・codecとquery/image warm-upが成功するまでinitializerをresolveしない。推論有効moduleは専用推論Worker/sessionを一組所有し、同moduleの接続で使う。異なるmodule・Workerへ共有しない。同時推論は1。モデル共有poolは提供しない。なお、SQLiteの同期UDF（`embedding()` / `embedding_query()`）は内部で `Atomics.wait` を用いるため、ブラウザ環境で同期UDFを実行するDB ownerはWeb Worker上で動作する前提とし、メインスレッド上で同期推論UDFを呼び出した場合は `Atomics.wait` 不可のため `E_ENVIRONMENT` を送出する。
+公式loader初期化後に推論sessionを準備する。ブラウザ版エントリ（`src/official/browser.ts`）においても、`initializeOfficialRuntime` の第4引数（`prepareInference`）へ `createBrowserInferenceSession` を必ず接続し、専用推論Worker（`dist/workers/inference-browser.mjs` / `InferenceBrowserController`）・OPFS永続キャッシュ（`.svw-models`）・実推論エンジンを確立する。モデル・codecとquery/image warm-upが成功するまでinitializerをresolveしない。推論有効moduleは専用推論Worker/sessionを一組所有し、同moduleの接続で使う。異なるmodule・Workerへ共有しない。同時推論は1。モデル共有poolは提供しない。なお、SQLiteの同期UDF（`embedding()` / `embedding_query()`）は内部で `Atomics.wait` を用いるため、ブラウザ環境で直接 `initialize({ embedding })` を呼ぶ場合は Dedicated Worker 上で実行する必要があり、メインスレッド上で呼び出した場合は初期化時点で `E_ENVIRONMENT` を送出する（メインスレッドからは `sqlite3EmbeddingWorkerPromiser` を使用する）。
 
 ### 3.4 接続と終了
 
@@ -91,7 +113,7 @@ vec1 は C の static auto-extension（`sqlite3_wasm_extra_init.c` による `sq
 
 ### 4.1 SQL関数一覧
 
-モデル非依存の汎用関数および診断用関数を提供する。`embedding` および `embedding_query` は `SQLITE_UTF8 | SQLITE_DIRECTONLY` フラグで登録し、VIEW や TRIGGER 経由の間接実行を拒否する。
+モデル非依存の汎用関数および診断用関数を提供する。`embedding` および `embedding_query` は `options.embedding` が有効化されている場合（`infer` が提供されている場合）にのみ `SQLITE_UTF8 | SQLITE_DIRECTONLY` フラグで登録し、VIEW や TRIGGER 経由の間接実行を拒否する。`options.embedding` 未指定時はこれらを登録せず、`DISTANCE` および `gemma_model_info()` のみを登録する。
 
 | 関数 | 登録arity | 用途 |
 | --- | :--- | :--- |
