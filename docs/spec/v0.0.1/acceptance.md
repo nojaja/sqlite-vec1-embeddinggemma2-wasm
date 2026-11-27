@@ -55,7 +55,9 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
 | `inference-initialize.test.ts` | env/cache、audio 無効 vision 保持、2 warm-up、失敗 dispose、Wasm/DML session options |
 | `inference-worker.test.ts` | envelope/generation/image 変換、SAB publish、固定 numeric error |
 | `model-manifest.test.ts` | 汎用マニフェストスキーマ検証（`schemaVersion`, `modelId`, `repository`, `revision`, `profile.dimension`, `assets`）、参照11資材および `ruri-v3` 等任意資材集合、重複/欠落/digest 拒否、license evidence |
+| `multi-model-support.test.ts` | マルチモデル登録・解決・キャッシュ共存 |
 | `node-model-cache-flow.test.ts` | persistent 初期化後だけ VerifiedModelCache 消費、再起動 offline、`modelId`/`repository`/`revision`/`strictAllowlist: false` 指定時の任意アセット数モデル受容 |
+| `non-vision-model.test.ts` | テキスト専用モデル（`vision: false`, `ruri-v3` 等）の `AutoTokenizer` のみによる初期化（`AutoProcessor` 非呼出し、`preprocessor_config.json` 不要）、クエリウォームアップのみ実行、画像要求 `E_INPUT` 拒否、`last_hidden_state` からの Mean / CLS プーリングおよび `dim * 4` バイト BLOB 変換 |
 | `node-model-cache-url.test.ts` | 危険 URL 拒否、loopback integration 許可 |
 | `node-persistent-cache-storage.test.ts` | bounded lifecycle、containment/symlink、set 排他 |
 | `official-browser-assets.test.ts` | document URL 非依存、package 相対・明示 `workerUrl`/`manifestUrl`/`modelBaseUrl`/`dbWorkerUrl` 解決、外部CDN許可と危険 URL 拒否、`prepareInference` 接続 |
@@ -132,3 +134,6 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
    - `VECTOR(512, 'ruri-v3')` 列に対して、異なるモデルを指定した `embedding(text, 'embeddinggemma-2')`（または他モデル由来のベクトル）を INSERT / UPDATE した場合に `E_MODEL_MISMATCH` が送出されること。
    - `VECTOR(512, 'ruri-v3')` 列に対して、異なる次元数（例: 768 次元 = 3072 バイト）の BLOB を INSERT / UPDATE した場合に `E_EMBEDDING_VALUE` が送出されること。
    - 登録されていない未知のモデル名が指定された場合に `E_INPUT` が送出されること。
+7. **テキスト専用モデル（`profile.vision === false`）の初期化およびプーリング検証**:
+   - `ruri-v3` や BERT / ModernBERT 等の `preprocessor_config.json` や画像エンコーダ ONNX を持たないテキスト専用モデルを `options.models` に指定して初期化した場合、`AutoProcessor.from_pretrained` による `preprocessor_config.json` のフェッチを実行せず、`AutoTokenizer` のみで初期化が完了し、OPFS 等へテキスト関連資材（`onnx/model_q4.onnx`, `tokenizer.json` 等）が保存されて `READY` 状態へ遷移すること（`SyntaxError` や `E_ASSET_INTEGRITY` が発生しないこと）。
+   - `sentence_embedding` を直接出力せず `last_hidden_state`（shape `[1, seq_len, dimension]`）を出力するテキストモデルであっても、Mean プーリング（`attention_mask` 考慮）または CLS プーリングにより `[1, dimension]` のベクトルを抽出し、L2 正規化済み `dimension * 4` バイトの `blob`（例: 512 次元で 2048 バイト）が返却されること。

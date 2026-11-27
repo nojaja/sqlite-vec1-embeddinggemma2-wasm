@@ -15,7 +15,8 @@
 - `path` / `repository`・`revision`: ローカル配置パスまたはマニフェストが指すモデルリポジトリ・不変リビジョン
 - `dimension`: 埋め込み次元数（例: 256, 512, 768）。マニフェストの `profile.dimension` で必須指定（1以上の整数、8192B SAB 上限内では最大 2040 次元）。
 - `dtype`: 量子化・精度形式（例: `'q4'`, `'q8'`, `'fp32'`）。マニフェストの `profile.dtype` に従う。
-- `vision`: 画像入力の対応可否（`false` の場合はテキスト専用モデルとして扱い、画像ウォームアップを省略し、画像入力要求には `E_INPUT` を返す）。
+- `vision`: 画像入力の対応可否（`false` の場合はテキスト専用モデルとして扱い、`AutoProcessor` による `preprocessor_config.json` 読み込み・画像コーデック初期化・画像ウォームアップをすべて省略し、`AutoTokenizer` のみで初期化する。画像入力要求には `E_INPUT` を返す）。
+- `pooling`: 出力テンソルのプーリング方式（`"mean"` | `"cls"`、既定: `"mean"`）。モデルが `sentence_embedding` を直接出力せず `last_hidden_state`（shape `[1, seq_len, dimension]`）を出力する場合のベクトル抽出方式を指定する。
 - `normalize`: コサイン類似度向けの L2 正規化（既定: `true`）
 - `prefix`: クエリ用・文書用のプレフィックス定義（例: `embeddinggemma-2` は `task: search result | query: ` / `title: ... | text: `、`ruri-v3` は `検索クエリ: ` / `検索文書: ` 等、マニフェストまたはプロファイル定義に従う）。
 
@@ -72,9 +73,18 @@ license evidenceはid=`apache-2.0`、metadataPath=`README.md`、metadataBytes=28
 
 ## 2. 共通推論初期化
 
-Transformers.js 4.3.1のAutoConfig/AutoProcessor/AutoModelを使う。private runtimeへ検証済みcacheを設定し、`useCustomCache=true`、`useBrowserCache=false`、`useFSCache=false`、`useFS=false`、`allowLocalModels=true`、`allowRemoteModels=false`、`localModelPath="/models/"`、`useWasmCache=false`。ブラウザ推論ワーカー（`src/workers/inference-browser.ts`）および初期化処理（`src/inference/initialize.ts`）においてもこれらを `runtime.env` へ明示的に設定し、ブラウザ環境のデフォルトによるローカルモデル読み込み拒否（`Invalid configuration detected: local models are disabled`）を抑止する。OPFS ルート直下の `.svw-models` ディレクトリを解決して永続キャッシュストレージへ渡す。env.fetchはcache外通信を必ず `E_ASSET_INTEGRITY` で拒否する。local_files_only=trueと固定revisionを全loaderへ渡す。
+Transformers.js 4.3.1のAutoConfig/AutoProcessor/AutoTokenizer/AutoModelを使う。private runtimeへ検証済みcacheを設定し、`useCustomCache=true`、`useBrowserCache=false`、`useFSCache=false`、`useFS=false`、`allowLocalModels=true`、`allowRemoteModels=false`、`localModelPath="/models/"`、`useWasmCache=false`。ブラウザ推論ワーカー（`src/workers/inference-browser.ts`）および初期化処理（`src/inference/initialize.ts`）においてもこれらを `runtime.env` へ明示的に設定し、ブラウザ環境のデフォルトによるローカルモデル読み込み拒否（`Invalid configuration detected: local models are disabled`）を抑止する。OPFS ルート直下の `.svw-models` ディレクトリを解決して永続キャッシュストレージへ渡す。env.fetchはcache外通信を必ず `E_ASSET_INTEGRITY` で拒否する。local_files_only=trueと固定revisionを全loaderへ渡す。
 
-初期化順はbackend設定、codec（vision有効時）、config、audio_config=null（存在時）、processor/tokenizer、model（`profile.dtype`指定）、engine attach、query warm-up、および（vision対応モデルに限り）image warm-up。vision_configは保持する。feature-extraction pipelineで不要encoderを読む方式にしない。`ruri-v3` 等のテキスト専用モデル（`vision === false` または `vision_encoder` 資材を持たないモデル）では、`dtype` にテキストモデル用量子化指定のみを適用し、画像ウォームアップは実行しない（画像入力要求は `E_INPUT` で拒否する）。warm-up query本文は `warm up`。共通imageは次の1px PNGで、Node/browserで同じbytesを使う。
+初期化順はbackend設定、codec（`vision !== false` 時のみ）、config、audio_config=null（存在時）、processor（`vision !== false` 時）またはtokenizer（`vision === false` 時）、model（`profile.dtype`指定。既定値は `vision !== false` 時は `{ model: "q4", vision_encoder: "q4" }`、`vision === false` 時は `"q4"`）、engine attach、query warm-up、および（vision対応モデルに限り）image warm-up。vision_configは保持する。feature-extraction pipelineで不要encoderを読む方式にしない。
+
+`ruri-v3` や BERT / ModernBERT 等のテキスト専用モデル（`profile.vision === false` または `preprocessor_config.json` / `vision_encoder` 資材を持たないモデル）における詳細実装仕様は以下の通りとする：
+1. **プロセッサ／トークナイザ分岐ロード（`src/inference/initialize.ts` / `scripts/build/inference.ts`）**:
+   - `scripts/build/inference.ts` の `createEntry` にて `AutoTokenizer`（`@huggingface/transformers` の `src/models/auto/tokenization_auto.js`）を `PortableRuntime` の公開メンバとしてエクスポートする。
+   - `initializeInferenceEngine` において `visionEnabled === false` の場合は `runtime.AutoProcessor.from_pretrained` を一切呼び出さず（存在しない `preprocessor_config.json` へのネットワーク・キャッシュフェッチによる `SyntaxError` / `E_ASSET_INTEGRITY` を完全に回避する）、`runtime.AutoTokenizer.from_pretrained(modelRepository, { revision: modelRevision, local_files_only: true })` のみを呼び出す。
+   - 取得したトークナイザは `(text, _image) => tokenizer(text, { padding: true, truncation: true })` と `tokenizer` プロパティ（`all_special_tokens` 参照用）を持つ `RuntimeProcessor` 互換ラッパーとして `engine.attach` へ渡す。
+   - テキスト専用モデルでは画像コーデック初期化（`initializeImageCodecs`）および画像ウォームアップを実行せず、クエリウォームアップ（本文 `"warm up"`）のみを実行して `READY` へ遷移する（画像入力要求は `E_INPUT` で拒否する）。
+
+共通imageは次の1px PNGで、Node/browserで同じbytesを使う。
 
 ```text
 iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==
@@ -84,7 +94,14 @@ WasmはORT Web `1.31.0-dev.20260914-8d85527a0`、numThreads=1、proxy=false、pa
 
 Node.js 環境における Wasm 実行では、マルチスレッド（`numThreads > 1`）時に ONNX Runtime 内部で WebAssembly Worker 起動用の動的 `blob:` URL (`URL.createObjectURL`) を生成して `import(blobUrl)` を試みる挙動を完全に回避しなければならない。Node.js のデフォルト ESM ローダーは `blob:` スキームをサポートしておらず、`ERR_UNSUPPORTED_ESM_URL_SCHEME` 例外が発生するためである。このため、Node.js 実行環境ではスレッド数を厳格に `numThreads = 1`（単一スレッド）に強制し、動的 `blob:` URL の生成および動的インポートを完全に抑止する。上流 Transformers.js の内部バックエンド参照（`ONNX_ENV`）への浅いコピーに起因するスレッド設定の不達を防ぐため、`patches/transformers-portable.patch` により `env.backends.onnx = ONNX_ENV` の直接参照結合を保証し、外部から設定された `numThreads = 1` がランタイム内部へ確実に伝播する設計とする。
 
-textはprocessor(formattedText,null)、imageはprocessor(null,decodedImage)。最終input_ids.data.lengthを検証してからmodelを呼ぶ。sentence_embeddingのみを出力BLOBへ変換する。成功・失敗とも入力/出力のdispose可能objectをidentityのSetで重複排除して一度ずつdisposeする。
+textはprocessor(formattedText,null)、imageはprocessor(null,decodedImage)。最終input_ids.data.lengthを検証してからmodelを呼ぶ。モデル出力のベクトル抽出およびプーリング（`src/inference/engine.ts`）は以下の規約に従う：
+- `output.sentence_embedding` が存在する場合: `[1, dimension]` の `Float32Array` として抽出し、`embeddingToBlob` により L2 正規化およびリトルエンディアン BLOB（`dimension * 4` バイト）へ変換する。
+- `output.sentence_embedding` が存在せず `output.last_hidden_state`（shape `[1, seqLen, dimension]`、`seqLen >= 1`、`Float32Array`）が存在する場合（`ruri-v3` や BERT / ModernBERT 等の一般的なテキスト ONNX モデル）:
+  - `pooling === "cls"` のとき: 先頭トークン（インデックス 0、オフセット `0 .. dimension - 1`）を抽出する。
+  - 既定（`pooling === "mean"` または省略時）のとき: `inputs.attention_mask` が存在すれば `mask[t] !== 0` の有効トークン（存在しない場合は全トークン `0 .. seqLen - 1`）を対象に各次元を算術平均する Mean プーリングを実行し、`Float32Array(dimension)` として `[1, dimension]` で `embeddingToBlob` へ渡す（有効トークン数が 0 の場合は `E_EMBEDDING_VALUE`）。
+- いずれの有効な出力テンソルも存在しない場合、または型（`Float32Array`）・shape・次元数が一致しない場合は `E_EMBEDDING_VALUE` を送出する。
+
+成功・失敗とも入力/出力のdispose可能objectをidentityのSetで重複排除して一度ずつdisposeする。
 
 engine.attachは一度だけ。closedまたは二重attach、未attachのembedは `E_ENVIRONMENT`。closeはmodelを一度disposeし、processor/model参照を外し、再closeは成功する。既知VectorErrorは保持し、未知例外は本文を捨て `E_INFERENCE`。別bundle由来画像例外はcodeが `E_IMAGE_FORMAT` または `E_IMAGE_LIMIT` のときだけ自moduleのVectorErrorへ変換する。任意codeの偽装は受理しない。
 
