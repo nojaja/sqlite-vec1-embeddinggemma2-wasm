@@ -18,7 +18,7 @@
 | 互換検証用 archive | 公式 demo リポジトリアーカイブ（`sqlite-wasm-ccbb81134a3b5a824f8a3cc3c5d8edd6e799ab5a.tar.gz`）を取得し、公式デモとの互換性を検証する。 |
 | 上流修正パッチ資材 (`patches/`) | Transformers.js 4.3.1 および SQLite 公式資材に対する限定パッチ群（`patches/transformers-portable.patch`、`patches/transformers-directml.patch`、`patches/sqlite-official.patch`）。環境分離・Wasm 安定化・DirectML 認識・バグ回避のために必須。 |
 | manifests/embeddinggemma2-q4.json | モデルの 11 資材の完全性（ファイルサイズ、SHA-256、artifactSetHash、fingerprint、license、profile）を定義し、推論初期化時に検証する。`npm run lock:model` または `npm run lock-assets`（`scripts/assets/lock-model.ts` / `lock-assets.ts`）により仕様定義および配置資材から生成・ロックする（`node scripts/download-assets.mjs` 初回実行時に未存在の場合は、内部で `scripts/assets/lock-model.ts` を自動実行して正準マニフェストを生成してからモデル取得へ進む）。 |
-| 推論モデル (EmbeddingGemma 2) | HuggingFace の固定リビジョンから 11 資材を取得し、`model/embeddinggemma-2-ONNX/daa72c51243991dfcaf9f9137d2c573d8f7790c0/` へ配置する。 |
+| 既定の参照モデル (EmbeddingGemma 2) | HuggingFace の固定リビジョンから 11 資材を取得し、`model/embeddinggemma-2-ONNX/daa72c51243991dfcaf9f9137d2c573d8f7790c0/` へ配置する。 |
 
 ---
 
@@ -47,7 +47,7 @@
 
 ---
 
-## 3. 推論モデル資材 (EmbeddingGemma 2)
+## 3. 既定の参照モデル資材 (EmbeddingGemma 2)
 
 各ファイルを `model/embeddinggemma-2-ONNX/daa72c51243991dfcaf9f9137d2c573d8f7790c0/` へ保存する。
 固定リポジトリ `onnx-community/embeddinggemma-2-ONNX` の固定リビジョン `daa72c51243991dfcaf9f9137d2c573d8f7790c0` から取得する。

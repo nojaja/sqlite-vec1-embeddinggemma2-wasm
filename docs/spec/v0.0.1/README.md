@@ -1,6 +1,6 @@
 # v0.0.1 製品設計
 
-SQLite公式API、vec1とEmbeddingGemma 2を統合するpackageの設計です。以下の文書を合わせて実装してください。
+SQLite公式APIとvec1を統合し、ONNX埋め込みモデル（既定の参照モデル: EmbeddingGemma 2、`ruri-v3` 等の任意モデルにも対応）をSQLite上のEmbeddingとして利用可能にするpackageの設計です。以下の文書を合わせて実装してください。
 
 実施順序、失敗時の戻り先、moduleの責務分担は[開発ガイド](../../development.md)を参照してください。本表の製品契約が正本であり、手順書によって必須機能や合格条件を省略しません。
 

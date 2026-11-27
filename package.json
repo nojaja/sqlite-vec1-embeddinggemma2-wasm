@@ -1,8 +1,14 @@
 {
   "name": "@nojaja/sqlite-vec1-embeddinggemma2-wasm",
   "version": "0.0.1",
-  "description": "SQLite official vec1 and EmbeddingGemma 2 with WebAssembly runtimes",
-  "keywords": ["sqlite", "sqlite-wasm", "vector-search", "embeddings", "typescript"],
+  "description": "SQLite with official vec1 and ONNX embedding models (default: EmbeddingGemma 2) on WebAssembly runtimes",
+  "keywords": [
+    "sqlite",
+    "sqlite-wasm",
+    "vector-search",
+    "embeddings",
+    "typescript"
+  ],
   "private": false,
   "type": "commonjs",
   "main": "./dist/index.bundle.js",

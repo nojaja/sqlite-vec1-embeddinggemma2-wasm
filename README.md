@@ -1,13 +1,13 @@
 # SQLite vec1 / EmbeddingGemma 2 Wasm
 
-SQLite 3.54.1、公式 vec1 0.8、および EmbeddingGemma 2 を統合する TypeScript ライブラリです。
-公開 package 名は `sqlite-vec1-embeddinggemma2-wasm`、version は `0.0.1` です。
+SQLite 3.54.1 と公式 vec1 0.8 を統合し、ONNX 埋め込みモデル（既定の参照モデル: EmbeddingGemma 2、`ruri-v3` 等の任意モデルにも対応）を SQLite 上の Embedding として利用可能にする TypeScript ライブラリです。
+公開 package 名は `@nojaja/sqlite-vec1-embeddinggemma2-wasm`、version は `0.0.1` です。
 
 ---
 
 ## 1. 開発環境
 
-- **ランタイム**: Node.js 24 (または v22.x)
+- **ランタイム**: Node.js 24
 - **パッケージマネージャー**: npm
 - **推奨ブラウザ**: Microsoft Edge（WebGPU 検証用）
 - **GPU 実行 (任意)**: Windows x64 + DirectML 対応 GPU
@@ -50,10 +50,10 @@ npm run build
 本プロジェクトのすべてのテストは、テストコードを変更することなく 100% 通過（ALL GREEN）するように実装されています。
 
 ```shell
-# 単体テスト (33 スイート / 184 テスト)
+# 単体テスト (36 スイート / 208 テスト)
 npm test
 
-# E2E 実推論テスト (Wasm CPU / DirectML GPU / Edge WebGPU)
+# E2E 実推論テスト (Wasm CPU / DirectML GPU / Edge WebGPU / 仕様契約クエリ)
 npm run test:e2e
 
 # 各種機能・統合テスト
