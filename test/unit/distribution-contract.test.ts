@@ -219,4 +219,30 @@ describe("Distribution and Drop-in Compatibility Contracts", () => {
       }
     });
   });
+
+  describe("7. Browser DB Worker OPFS async proxy bundling contract", () => {
+    test("bundles sqlite3-opfs-async-proxy.js alongside dist/workers/db-browser.mjs and records it in build-content.json", () => {
+      const dbWorkerPath = resolve(rootDir, "dist/workers/db-browser.mjs");
+      const rootProxyPath = resolve(rootDir, "dist/sqlite3-opfs-async-proxy.js");
+      const workerProxyPath = resolve(rootDir, "dist/workers/sqlite3-opfs-async-proxy.js");
+      const buildContentPath = resolve(rootDir, "dist/reports/build-content.json");
+
+      expect(existsSync(dbWorkerPath)).toBe(true);
+      expect(existsSync(rootProxyPath)).toBe(true);
+
+      // db-browser.mjs が import.meta.url 相対で sqlite3-opfs-async-proxy.js を解決するため、
+      // 同ディレクトリ dist/workers/ 配下にも同一ファイルが同梱されていること
+      const dbWorkerSource = readFileSync(dbWorkerPath, "utf8");
+      expect(dbWorkerSource).toMatch(/new URL\(\s*["']sqlite3-opfs-async-proxy\.js["']\s*,\s*import\.meta\.url\s*\)/);
+      expect(existsSync(workerProxyPath)).toBe(true);
+      expect(readFileSync(workerProxyPath)).toEqual(readFileSync(rootProxyPath));
+
+      // ビルド監査レポートにも dist/workers/sqlite3-opfs-async-proxy.js が記録されていること
+      expect(existsSync(buildContentPath)).toBe(true);
+      const buildContent = JSON.parse(readFileSync(buildContentPath, "utf8")) as {
+        files: Array<{ path: string }>;
+      };
+      expect(buildContent.files.some((entry) => entry.path === "dist/workers/sqlite3-opfs-async-proxy.js")).toBe(true);
+    });
+  });
 });

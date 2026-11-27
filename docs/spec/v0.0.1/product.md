@@ -97,7 +97,7 @@ declare function sqlite3EmbeddingWorkerPromiser(
 検証順序は、embedding省略の短絡、実行コンテキスト制約（ブラウザメインスレッド早期検知）、option/model object、Node対応matrix、backend、network、base URL、期限。
 - **Node.js メインスレッド制約の緩和**: Node.js 環境ではメインスレッドでも `Atomics.wait` が利用可能であるため、バックグラウンド Worker（`inference-node.js`）を介して推論を実行できる。
 - **ブラウザメインスレッド実行時の早期検知**: ブラウザ環境（`env.runtime === "browser"`）において、Dedicated Worker 外（`window` コンテキスト等、`!env.worker`）で `options.embedding` が指定された場合、SQLite 同期 UDF 内の `Atomics.wait` が Web 標準仕様により `TypeError` で禁止されているため、モデルや推論 Worker を起動する前の初期化時点（`validateEmbeddingOptions`）で即座に `VectorError("E_ENVIRONMENT")` を送出する。同時に、Dedicated Worker 内での実行またはメインスレッド向けラッパー `sqlite3EmbeddingWorkerPromiser` の利用が必要である旨の明示的なガイダンス（`console.warn` 等）を出力する。
-- **ブラウザメインスレッド向け Promiser ラッパー (`sqlite3EmbeddingWorkerPromiser`)**: メインスレッドの Web アプリケーションから安全に `embedding` / `embedding_query` UDF を利用できるよう、SQLite 本体を Dedicated Worker（`dist/workers/db-browser.mjs`）に内包し、その内部から推論 Worker（`dist/workers/inference-browser.mjs`）と同期ブリッジ接続する Promiser 型 RPC ラッパーを公式エクスポートとして提供する。
+- **ブラウザメインスレッド向け Promiser ラッパー (`sqlite3EmbeddingWorkerPromiser`)**: メインスレッドの Web アプリケーションから安全に `embedding` / `embedding_query` UDF を利用できるよう、SQLite 本体を Dedicated Worker（`dist/workers/db-browser.mjs`）に内包し、その内部から推論 Worker（`dist/workers/inference-browser.mjs`）と同期ブリッジ接続する Promiser 型 RPC ラッパーを公式エクスポートとして提供する。また、同 Worker 内で公式 OPFS VFS（`opfs` / `opfs-wl`）の初期化処理が `import.meta.url` 相対で `sqlite3-opfs-async-proxy.js` を要求するため、`dist/workers/sqlite3-opfs-async-proxy.js` を同梱し、追加設定なしで動作する構成を維持する。
 
 | 推論を行う環境 | wasm | webgpu | directml |
 | --- | --- | --- | --- |
