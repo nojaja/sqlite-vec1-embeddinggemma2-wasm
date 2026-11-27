@@ -10,7 +10,7 @@
 3. **実資材統合試験ゲート (G05)**: 製品モジュール（`src/runtime-assets/model-contract`、`src/sqlite/node-model-cache`）連携のもと `npm run test:assets` を実行し、実モデルのオンライン取得、オフラインキャッシュ、破損拒否・修復、並行取得排他が PASS することを確認する。
 4. **単体テストスイート**: `npm test` により、36 ファイル・208 テストすべてが PASS することを確認する。
 5. **統合テスト・機能ゲート**:
-   - `npm run test:sqlite`: 公式 UDF、未準備短絡、`_svw_meta` 非作成要件、vec1 テーブル動作（`vec1_info()` が `"version 0.8 (Scalar, single-threaded)"` を返すこと）
+   - `npm run test:sqlite`: 公式 UDF（`DISTANCE`, `gemma_model_info`）、推論無効時の `embedding` / `embedding_query` UDF 未登録（`no such function`）および `gemma_model_info()` の `{"ready":false}` 返却、`_svw_meta` 非作成要件、vec1 テーブル動作（`vec1_info()` が `"version 0.8 (Scalar, single-threaded)"` を返すこと）
    - `npm run test:storage`: `node-file` VFS CRUD、排他ロック、クラッシュ復旧、メタデータ保護
    - `npm run test:search`: 実モデル検索、キャッシュ増分整合性 (`actualInference`)
    - `npm run test:embedding-cache`: ステートメントキャッシュ分離、100行評価と実推論回数検証
@@ -58,15 +58,15 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
 | `node-model-cache-flow.test.ts` | persistent 初期化後だけ VerifiedModelCache 消費、再起動 offline |
 | `node-model-cache-url.test.ts` | 危険 URL 拒否、loopback integration 許可 |
 | `node-persistent-cache-storage.test.ts` | bounded lifecycle、containment/symlink、set 排他 |
-| `official-browser-assets.test.ts` | document URL 非依存、package 相対・明示 `workerUrl`/`manifestUrl`/`modelBaseUrl` 解決、外部CDN許可と危険 URL 拒否、`prepareInference` 接続 |
+| `official-browser-assets.test.ts` | document URL 非依存、package 相対・明示 `workerUrl`/`manifestUrl`/`modelBaseUrl`/`dbWorkerUrl` 解決、外部CDN許可と危険 URL 拒否、`prepareInference` 接続 |
 | `official-functions.test.ts` | model 検証が NULL/READY より先、型/空白/NUL、query/document/title 写像 |
 | `official-initialize.test.ts` | 公式 option 転送、embedding 省略 prepare 0、READY 待機、DB close 前拒否、pool pause だけ |
 | `official-metadata.test.ts` | 7 key 版/空間（`productVersion: "0.0.3"` 固定、`"0.0.2"` 等の拒否）、一致、backend 非保存、未知 schema/混在拒否 |
 | `official-node-entry.test.ts` | main thread 推論初期化許可（E_ENVIRONMENT 拒否の撤廃）、環境情報引継ぎ |
 | `official-node-files.test.ts` | ownership 競合、short read ゼロ埋め、fsync/write/reopen、symlink 拒否、temporary 回収 |
-| `official-options.test.ts` | 省略、main 許可、matrix、1/1800000 境界、0/NaN/Infinity/unknown 拒否 |
-| `official-public-exports.test.ts` | default initializer、browser named promiser、廃止 API を公開しない |
-| `official-runtime.test.ts` | 実 SQLite transactions/NULL、公式上流準拠の SQL trace 出力（`flags: "ct"` 時の実行 SQL 出力）および `step()` 失敗時 `console.warn`、2 Stmt authorizer、DIRECTONLY、metadata、DISTANCE |
+| `official-options.test.ts` | 省略、Node main 許可、browser Dedicated Worker 許可、browser main thread 推論指定時の `E_ENVIRONMENT` 早期拒否、matrix、1/1800000 境界、0/NaN/Infinity/unknown 拒否 |
+| `official-public-exports.test.ts` | default initializer、browser named `sqlite3Worker1Promiser` および `sqlite3EmbeddingWorkerPromiser`、廃止 API を公開しない |
+| `official-runtime.test.ts` | 実 SQLite transactions/NULL、`infer` 未指定時の `embedding`/`embedding_query` UDF 未登録（`no such function`）、公式上流準拠の SQL trace 出力（`flags: "ct"` 時の実行 SQL 出力）および `step()` 失敗時 `console.warn`、2 Stmt authorizer、DIRECTONLY、metadata、DISTANCE |
 | `persistent-model-cache.test.ts` | cold stage/ready（初回 `ready.json` 不在時は事前削除なし、既存 `ready.json` 存在時のみ先に削除）、offline 通信 0、corrupt online 修復、明示 recover、別 set/DB 保護 |
 | `profile.test.ts` | 768D LE 独立 BLOB、shape/NaN/zero 拒否、exact prefix/NULL、2048 token、本文/title bytes |
 | `protocol.test.ts` | 通知先行/待機中 publish、state 放棄、公開済保護、cancel/期限、不正 header/size |
@@ -107,8 +107,10 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
 2. **Node.js DirectML GPU 実推論 (`test/e2e/sql-semantic-search-directml.test.ts`)**:
    - Windows x64 環境で DirectML 実行プロバイダーが選択され、GPU 上でテンソル計算が実行されること。
    - Wasm 推論結果とのコサイン類似度が `0.999999` 以上の一致（Parity）を達成すること。
-3. **ブラウザ WebGPU 実推論 (`test/e2e/browser-inference.test.ts`)**:
+3. **ブラウザ WebGPU 実推論・メインスレッド Promiser (`test/e2e/browser-inference.test.ts`)**:
    - MS Edge ブラウザ環境で WebGPU アダプター/デバイスが正常に取得され、テキストクエリおよび画像埋め込みの実推論が完了すること。
+   - ブラウザメインスレッドから `initialize({ embedding })` を直接呼び出した場合に初期化時点で `E_ENVIRONMENT` が送出されること。
+   - ブラウザメインスレッドから `sqlite3EmbeddingWorkerPromiser({ embedding })` を呼び出し、Dedicated Worker 内の `embedding()` / `embedding_query()` / `DISTANCE()` を含む SQL 実行および `shutdown` が正常完了すること。
 4. **仕様契約クエリ実推論 (`test/e2e/vector-contract-query.test.ts`)**:
    - `VECTOR(768 , 'embeddinggemma-2') STRICT` テーブル定義が Lemon 文法解析および STRICT 列型検証を通過し、TypeScript 側での置換なしにネイティブ・透過的に作成されること。
    - `PRAGMA table_info` および `sqlite_schema` において型宣言文字列 `VECTOR(768 , 'embeddinggemma-2')` が完全保持されること。

@@ -7,8 +7,23 @@ test("official initializer: omitted embedding remains model-free", () => {
   expect(validateEmbeddingOptions(undefined, { ...worker, worker: false })).toBeUndefined();
 });
 
-test("official initializer: allows embedding on main thread without E_ENVIRONMENT", () => {
+test("official initializer: allows embedding on Node main thread without E_ENVIRONMENT", () => {
   expect(validateEmbeddingOptions({ model }, { ...worker, worker: false })?.backend).toBe("wasm");
+});
+
+test("official initializer: rejects embedding on browser main thread with E_ENVIRONMENT and guidance", () => {
+  const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    expect(() =>
+      validateEmbeddingOptions(
+        { model },
+        { worker: false, runtime: "browser", platform: "browser", architecture: "browser" }
+      )
+    ).toThrow("E_ENVIRONMENT");
+    expect(warn).toHaveBeenCalled();
+  } finally {
+    warn.mockRestore();
+  }
 });
 
 test("official initializer: preserves explicit backends without fallback", () => {

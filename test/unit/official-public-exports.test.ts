@@ -8,6 +8,7 @@ test("v0.0.3 exports: official default initializers replace the legacy Promise d
   expect(nodeEntry).toHaveProperty("default", expect.any(Function));
   expect(browserEntry).toHaveProperty("default", expect.any(Function));
   expect(browserEntry).toHaveProperty("sqlite3Worker1Promiser", expect.any(Function));
+  expect(browserEntry).toHaveProperty("sqlite3EmbeddingWorkerPromiser", expect.any(Function));
   expect(nodeEntry).not.toHaveProperty("openVectorDatabase");
   expect(browserEntry).not.toHaveProperty("openVectorDatabase");
 });
