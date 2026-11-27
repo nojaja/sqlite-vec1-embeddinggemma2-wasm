@@ -51,4 +51,63 @@ async function verifyPersistentFlow(): Promise<void> {
   expect(fetcher).not.toHaveBeenCalled();
 }
 
+/**
+ * 処理名: カスタムモデル用少数アセットfixture生成
+ * 処理概要: 11資材ではない任意モデル（5資材）のdigestとbodyマップを生成する。
+ * 実装理由: Node環境でも任意アセット数のモデルキャッシュ準備が動作することを検証するため。
+ * @returns assetsとbody map。
+ */
+function customFixture(): { assets: ModelAssetDigest[]; bodies: Map<string, Uint8Array> } {
+  const bodies = new Map<string, Uint8Array>();
+  const paths = [
+    "onnx/model_q4.onnx",
+    "config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "config_sentence_transformers.json"
+  ];
+  const assets = paths.map((path, index) => {
+    const body = new TextEncoder().encode(`custom-node-cache-${index}`);
+    bodies.set(path, body);
+    return { path, bytes: body.length, sha256: createHash("sha256").update(body).digest("hex") };
+  });
+  return { assets, bodies };
+}
+
+/**
+ * 処理名: カスタムモデルonline/offline flow検証
+ * 処理概要: 11資材以外のモデルで modelId/repository/revision/strictAllowlist を指定して永続キャッシュと検証キャッシュを初期化できることを確認する。
+ * 実装理由: Node Worker におけるカスタムモデル利用時の E_ASSET_INTEGRITY 誤検知を防止するため。
+ */
+async function verifyCustomModelPersistentFlow(): Promise<void> {
+  const repository = "cl-nagoya/ruri-v3-310m-ONNX";
+  const revision = "v1.0.0";
+  const data = customFixture();
+  const fetcher = jest.fn(async (input: string | URL | Request): Promise<Response> => {
+    const urlStr = typeof input === "string" || input instanceof URL ? input.toString() : input.url;
+    const path = new URL(urlStr).pathname.split(`/resolve/${revision}/`)[1] as string;
+    return new Response(Uint8Array.from(data.bodies.get(path) ?? []));
+  });
+  const common = {
+    cacheDirectory,
+    baseUrl: `https://huggingface.co/${repository}/resolve/${revision}/`,
+    assets: data.assets,
+    artifactSetHash: setHash,
+    manifestHash,
+    modelId: "ruri-v3",
+    repository,
+    revision,
+    strictAllowlist: false
+  };
+  const online = await prepareNodeModelCache({ ...common, network: "allow" }, fetcher);
+  expect(fetcher).toHaveBeenCalledTimes(data.assets.length);
+  const key = `https://huggingface.co/${repository}/resolve/${revision}/config.json`;
+  expect(new Uint8Array(await (await online.match(key) as Response).arrayBuffer())).toEqual(data.bodies.get("config.json"));
+  fetcher.mockClear();
+  const offline = await prepareNodeModelCache({ ...common, network: "offline" }, fetcher);
+  expect(await offline.match(key)).toBeInstanceOf(Response);
+  expect(fetcher).not.toHaveBeenCalled();
+}
+
 test("G07 Node inference initializes persistent cache before consumption", verifyPersistentFlow);
+test("G07 Node inference initializes custom model cache with non-11 assets when strictAllowlist is false", verifyCustomModelPersistentFlow);

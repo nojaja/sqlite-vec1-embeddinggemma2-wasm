@@ -44,7 +44,7 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
 | `browser-worker-build.test.ts` | browser Worker/entry の Node/native 非到達、DirectML Worker の external native |
 | `browser-opfs-cache-storage.test.ts` | bounded write、atomic copy commit、path 拒否、Web Lock、abort/close |
 | `browser-model.test.ts` | HTTPS/loopback・クロスオリジンCDN許可・危険URL拒否、未知 path miss、HTTP非OK・size/hash検証、CORS/credentials |
-| `browser-initialize.test.ts` | 永続 cache 先行、offline fetch 0、codec 上限、WebGPU adapter 取得/失敗 |
+| `browser-initialize.test.ts` | 永続 cache 先行、offline fetch 0、codec 上限、WebGPU adapter 取得/失敗、`repository`/`revision`/`strictAllowlist: false` 指定時の任意アセット数モデル（11資材以外）受容 |
 | `db-worker.test.ts` | 同期動的次元 (`dim * 4` バイト、例: 512D=2048B / 768D=3072B) copy、`model` 伝播、NULL 送信なし、画像 copy、ID 1..10、cancel/timeout/遅延 |
 | `distribution-contract.test.ts` | npm 配布設定、他 dir パス解決、メインスレッド制約緩和、ブラウザ正式推論接続、TypeScript 型互換契約 |
 | `directml-vision-graph.test.ts` | 固定元 graph、128 変更、出力 size/hash、元 cache 不変、put 拒否 |
@@ -55,7 +55,9 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
 | `inference-initialize.test.ts` | env/cache、audio 無効 vision 保持、2 warm-up、失敗 dispose、Wasm/DML session options |
 | `inference-worker.test.ts` | envelope/generation/image 変換、SAB publish、固定 numeric error |
 | `model-manifest.test.ts` | 汎用マニフェストスキーマ検証（`schemaVersion`, `modelId`, `repository`, `revision`, `profile.dimension`, `assets`）、参照11資材および `ruri-v3` 等任意資材集合、重複/欠落/digest 拒否、license evidence |
-| `node-model-cache-flow.test.ts` | persistent 初期化後だけ VerifiedModelCache 消費、再起動 offline |
+| `multi-model-support.test.ts` | マルチモデル登録・解決・キャッシュ共存 |
+| `node-model-cache-flow.test.ts` | persistent 初期化後だけ VerifiedModelCache 消費、再起動 offline、`modelId`/`repository`/`revision`/`strictAllowlist: false` 指定時の任意アセット数モデル受容 |
+| `non-vision-model.test.ts` | テキスト専用モデル（`vision: false`, `ruri-v3` 等）の `AutoTokenizer` のみによる初期化（`AutoProcessor` 非呼出し、`preprocessor_config.json` 不要）、クエリウォームアップのみ実行、画像要求 `E_INPUT` 拒否、`last_hidden_state` からの Mean / CLS プーリングおよび `dim * 4` バイト BLOB 変換 |
 | `node-model-cache-url.test.ts` | 危険 URL 拒否、loopback integration 許可 |
 | `node-persistent-cache-storage.test.ts` | bounded lifecycle、containment/symlink、set 排他 |
 | `official-browser-assets.test.ts` | document URL 非依存、package 相対・明示 `workerUrl`/`manifestUrl`/`modelBaseUrl`/`dbWorkerUrl` 解決、外部CDN許可と危険 URL 拒否、`prepareInference` 接続 |
@@ -127,8 +129,11 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
    - **CAPI 直接実行検証**: TS の SQL 前処理ラッパーを介さず、低レベル CAPI（`sqlite3.capi.sqlite3_exec`）で直接 `CREATE VIRTUAL TABLE ... USING vec1` を実行し、`SQLITE_OK` で完了すること（Wasm バイナリ単体での vec1 静的組み込みの証明）。
 6. **複数埋め込みモデル（`ruri-v3` 等）動的利用検証および `VECTOR(dim, 'model')` スキーマ整合性検証**:
    - `initialize({ embedding: { models: { 'ruri-v3': { ... } }, defaultModel: '...' } })` により `ruri-v3`（512次元）等の他モデル（Hugging Face リポジトリ、ONNX パス、次元数、Tokenizer/prefix 設定を含むマニフェストまたはインライン設定）が登録可能であること。
-   - ブラウザ Worker（`inference-browser.mjs`）および Node Worker（`inference-node.js`）において、`embedding(text, 'ruri-v3')` 呼び出し時に該当モデルの ONNX 資材を OPFS（`.svw-models/models/<modelId>/<artifactSetHash>/`）または Node キャッシュへ動的ロード・キャッシュし、推論セッションを切り替えて 512 次元（2048 バイト）の Float32 BLOB を出力できること。
+   - ブラウザ Worker（`inference-browser.mjs`）および Node Worker（`inference-node.js`）において、`sqlite3EmbeddingWorkerPromiser` 等から `models` にアセット数 11 以外のカスタムモデル（例: `ruri-v3`）を指定して起動した場合でも `E_ASSET_INTEGRITY` で失敗せず、`embedding(text, 'ruri-v3')` 呼び出し時に該当モデルの ONNX 資材を OPFS（`.svw-models/models/<modelId>/<artifactSetHash>/`）または Node キャッシュへ動的ロード・キャッシュし、推論セッションを切り替えて 512 次元（2048 バイト）の Float32 BLOB を出力できること。
    - `CREATE TABLE ETOM (ID INTEGER PRIMARY KEY, NAME TEXT, DESCRIPTION TEXT, EMBEDDING VECTOR (512, 'ruri-v3'));` が受理され、`embedding(DESCRIPTION, 'ruri-v3')` および `embedding(DESCRIPTION)`（第 2 引数省略時の Authorizer カラムコンテキスト自動解決）、`embedding_query('顧客サポート', 'ruri-v3')` が 512 次元（2048 バイト）の Float32 BLOB を返却し、`DISTANCE` による近傍検索が完了すること。
    - `VECTOR(512, 'ruri-v3')` 列に対して、異なるモデルを指定した `embedding(text, 'embeddinggemma-2')`（または他モデル由来のベクトル）を INSERT / UPDATE した場合に `E_MODEL_MISMATCH` が送出されること。
    - `VECTOR(512, 'ruri-v3')` 列に対して、異なる次元数（例: 768 次元 = 3072 バイト）の BLOB を INSERT / UPDATE した場合に `E_EMBEDDING_VALUE` が送出されること。
    - 登録されていない未知のモデル名が指定された場合に `E_INPUT` が送出されること。
+7. **テキスト専用モデル（`profile.vision === false`）の初期化およびプーリング検証**:
+   - `ruri-v3` や BERT / ModernBERT 等の `preprocessor_config.json` や画像エンコーダ ONNX を持たないテキスト専用モデルを `options.models` に指定して初期化した場合、`AutoProcessor.from_pretrained` による `preprocessor_config.json` のフェッチを実行せず、`AutoTokenizer` のみで初期化が完了し、OPFS 等へテキスト関連資材（`onnx/model_q4.onnx`, `tokenizer.json` 等）が保存されて `READY` 状態へ遷移すること（`SyntaxError` や `E_ASSET_INTEGRITY` が発生しないこと）。
+   - `sentence_embedding` を直接出力せず `last_hidden_state`（shape `[1, seq_len, dimension]`）を出力するテキストモデルであっても、Mean プーリング（`attention_mask` 考慮）または CLS プーリングにより `[1, dimension]` のベクトルを抽出し、L2 正規化済み `dimension * 4` バイトの `blob`（例: 512 次元で 2048 バイト）が返却されること。
