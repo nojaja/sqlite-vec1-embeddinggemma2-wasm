@@ -157,6 +157,70 @@ async function verifyBrowserGpuConfiguration(): Promise<void> {
   await expect(configureBrowserGpu(runtime, "webgpu", { requestAdapter: jest.fn().mockResolvedValue(null) })).rejects.toThrow("E_ENVIRONMENT");
 }
 
+/**
+ * 処理名: カスタムモデル用少数アセット fixture
+ * 処理概要: 11資材ではない任意モデル（例: 5資材）のダイジェスト配列を生成する。
+ * 実装理由: strictAllowlist=false 時の任意アセット数モデル受容を検証するため。
+ * @returns 5資材のモデルアセット一覧。
+ */
+function customModelAssets(): ModelAssetDigest[] {
+  const sha256 = createHash("sha256").update(modelBytes).digest("hex");
+  const paths = [
+    "onnx/model_q4.onnx",
+    "config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "config_sentence_transformers.json"
+  ];
+  return paths.map((path) => ({ path, bytes: modelBytes.byteLength, sha256 }));
+}
+
+/**
+ * 処理名: カスタムモデルbrowser初期化検証
+ * 処理概要: アセット数11以外のモデルで repository/revision/strictAllowlist を渡した際に E_ASSET_INTEGRITY にならずキャッシュ解決できることを確認する。
+ * 実装理由: マルチモデル登録時に EmbeddingGemma 2 以外のモデルが拒絶される不具合を防ぐため。
+ * @returns 検証完了。
+ */
+async function verifyCustomModelBrowserInitialization(): Promise<void> {
+  const repository = "cl-nagoya/ruri-v3-310m-ONNX";
+  const revision = "v1.0.0";
+  const assets = customModelAssets();
+  const prepared = await prepareBrowserInference({
+    workerUrl: "https://example.test/dist/workers/inference-browser.mjs",
+    modelBaseUrl: "https://example.test/models/ruri-v3/",
+    backend: "wasm",
+    network: "allow",
+    artifactSetHash: "c".repeat(64),
+    manifestHash: "d".repeat(64),
+    assets,
+    fetcher: browserFetchFixture(),
+    persistentCache: persistentCacheFixture().cache,
+    repository,
+    revision,
+    strictAllowlist: false
+  });
+  const localCached = await prepared.cache.match(`/models/${repository}/config.json`);
+  expect(new Uint8Array(await (localCached as Response).arrayBuffer())).toEqual(modelBytes);
+  const remoteCached = await prepared.cache.match(`https://huggingface.co/${repository}/resolve/${revision}/config.json`);
+  expect(new Uint8Array(await (remoteCached as Response).arrayBuffer())).toEqual(modelBytes);
+
+  await expect(prepareBrowserInference({
+    workerUrl: "https://example.test/dist/workers/inference-browser.mjs",
+    modelBaseUrl: "https://example.test/models/ruri-v3/",
+    backend: "wasm",
+    network: "allow",
+    artifactSetHash: "c".repeat(64),
+    manifestHash: "d".repeat(64),
+    assets,
+    fetcher: browserFetchFixture(),
+    persistentCache: persistentCacheFixture().cache,
+    repository,
+    revision,
+    strictAllowlist: true
+  })).rejects.toThrow("E_ASSET_INTEGRITY");
+}
+
 test("G02: browser prepares same-origin inference assets", verifyBrowserInitialization);
 test("G02: browser rejects unsafe or missing inference assets", verifyBrowserInitializationFailure);
 test("G02: browser injects an explicit WebGPU adapter without fallback", verifyBrowserGpuConfiguration);
+test("G02: browser prepares custom model with non-11 assets when strictAllowlist is false", verifyCustomModelBrowserInitialization);
