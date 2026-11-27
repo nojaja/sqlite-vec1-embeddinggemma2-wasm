@@ -28,7 +28,7 @@ CREATE TABLE _svw_meta(id INTEGER PRIMARY KEY CHECK(id=1), metadata TEXT NOT NUL
 }
 ```
 
-追加schemaVersionやcreatedAtを要求しない。identityから生成する項目はmodelId、revision、fingerprint、profile。残りはproductVersion（`"0.0.3"`：npm パッケージ版 `"0.0.1"` とは独立した保存メタデータ形式契約の固定バージョン識別子）、dimension（`768`）、dtype（`"q4"`）の固定値。`"0.0.3"` 以外の `productVersion`（例: `"0.0.1"`, `"0.0.2"`）は `E_MODEL_MISMATCH` として拒否する。backendを変えて同一論理空間を再openできる。
+追加schemaVersionやcreatedAtを要求しない。identityから生成する項目はmodelId、revision、fingerprint、profile、dimension（`identity.dimension`、正の整数、未指定時既定 `768`）、dtype（`identity.dtype`、非空文字列、未指定時既定 `"q4"`）。残りはproductVersion（`"0.0.3"`：npm パッケージ版 `"0.0.1"` とは独立した保存メタデータ形式契約の固定バージョン識別子）の固定値。`"0.0.3"` 以外の `productVersion`（例: `"0.0.1"`, `"0.0.2"`）は `E_MODEL_MISMATCH` として拒否する。固定値 `768` や `"q4"` でのハードコード検証は行わず、`identity` の `dimension` / `dtype` との一致を検証する（`ruri-v3` の `512` 次元等に対応）。backendを変えて同一論理空間を再openできる。
 
 metadata表がない場合、`sqlite_schema`のうち `name NOT LIKE 'sqlite_%'` の件数0だけを新規空DBとしてbindする。非0はE_MODEL_UNBOUND。BEGIN IMMEDIATE内でDDLとbind付きINSERTを行いCOMMITする。失敗時ROLLBACK。JSONをSQLへ連結しない。
 

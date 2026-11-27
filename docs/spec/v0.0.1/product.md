@@ -32,6 +32,17 @@ browserには公式互換の `sqlite3Worker1Promiser` に加え、推論有効�
 
 ```typescript
 type Backend = "wasm" | "webgpu" | "directml";
+interface ModelConfigOptions {
+  manifestUrl?: string;
+  manifest?: Record<string, unknown>;
+  baseUrl?: string;
+  network?: "allow" | "offline";
+  cacheDirectory?: string;
+  dimension?: number;
+  dtype?: string;
+  prefix?: { query?: string; document?: string };
+  normalize?: boolean;
+}
 interface EmbeddingOptions {
   backend?: Backend;
   model?: { network: "allow" | "offline"; baseUrl?: string; cacheDirectory?: string };
@@ -39,7 +50,7 @@ interface EmbeddingOptions {
   manifestUrl?: string;
   initTimeoutMs?: number;
   sqlTimeoutMs?: number;
-  models?: Record<string, unknown>;
+  models?: Record<string, ModelConfigOptions | string>;
   defaultModel?: string;
 }
 type ProductInitOptions = Record<string, unknown> & {
@@ -97,7 +108,7 @@ declare function sqlite3EmbeddingWorkerPromiser(
 
 Nodeの他OS・architecture・major版は `E_ENVIRONMENT`。未知backend、`auto`、`gpu`、`dml`は `E_INPUT`。browserのWebGPU対応は実adapter/device取得を必要とし、`navigator.gpu`の存在だけで合格にしない。Chrome、macOS、ARM、NPU、CUDA、複数GPUは保証対象ではない。
 
-`network`は厳密にallow/offline。`baseUrl`はHTTPSまたはlocalhost・127.0.0.1・[::1]のHTTP、末尾 `/` 必須、userinfo/query/fragment禁止。Node・browserともに既定取得元は固定ONNX repository/revisionのresolve directory（`https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/daa72c51243991dfcaf9f9137d2c573d8f7790c0/`）とし、browser環境でも上記安全URL契約を満たす外部CDN（クロスオリジン）からのオンデマンドモデル取得を許可する（取得全11資材のSHA-256・バイトサイズ照合により完全性を担保する）。一方、browserの推論Worker・ORT Wasm・コーデックWasm等の実行資材は`entryUrl`基準または明示`workerUrl`（安全なURL・相対URL解決可）から解決する。環境変数でモデルIDやrevisionを差し替えない。
+`network`は厳密にallow/offline。`baseUrl`はHTTPSまたはlocalhost・127.0.0.1・[::1]のHTTP、末尾 `/` 必須、userinfo/query/fragment禁止。Node・browserともに`models`未指定時の既定参照モデルは`embeddinggemma-2`（`https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/daa72c51243991dfcaf9f9137d2c573d8f7790c0/`）とし、`models`や`manifestUrl`で`ruri-v3`等の他モデルが指定された場合は各マニフェスト（`manifests/*.json`または安全なURLの外部マニフェスト）の`repository`・`revision`・`assets`に基づいて取得元を解決する。browser環境でも上記安全URL契約を満たす外部CDN（クロスオリジン）からのオンデマンドモデル取得を許可する（マニフェスト記載の全資材のSHA-256・バイトサイズ照合により完全性を担保する）。一方、browserの推論Worker・ORT Wasm・コーデックWasm等の実行資材は`entryUrl`基準または明示`workerUrl`（安全なURL・相対URL解決可）から解決する。環境変数でモデルIDやrevisionを差し替えない。
 
 初期化期限は600000ms、SQL期限は120000msが既定。いずれも有限数かつ閉区間 `[1,1800000]`。現行validatorは整数に限定しない。nullish値は既定に展開する。範囲外、NaN、Infinityは `E_INPUT`。
 
@@ -115,12 +126,14 @@ vec1 は C の static auto-extension（`sqlite3_wasm_extra_init.c` による `sq
 
 モデル非依存の汎用関数および診断用関数を提供する。`embedding` および `embedding_query` は `options.embedding` が有効化されている場合（`infer` が提供されている場合）にのみ `SQLITE_UTF8 | SQLITE_DIRECTONLY` フラグで登録し、VIEW や TRIGGER 経由の間接実行を拒否する。`options.embedding` 未指定時はこれらを登録せず、`DISTANCE` および `gemma_model_info()` のみを登録する。
 
+`embedding(text[, model])` および `embedding_query(text[, model])` の第2引数 `[model]` は特定の固定モデル名（`"embeddinggemma-2"` 等）にハードコードせず、初期化時に登録された有効モデル集合（`options.models` または既定モデル）と動的に照合する。登録されていない未知のモデル名が指定された場合にのみ `E_INPUT` を送出し、登録済みモデル名が指定された場合はそのモデルに対応する推論セッション・パイプラインへリクエストを振り分ける。
+
 | 関数 | 登録arity | 用途 |
 | --- | :--- | :--- |
 | `embedding(text[, model])` | 1、2 | 文書（document）向け埋め込みベクトルの生成（`SQLITE_UTF8 \| SQLITE_DIRECTONLY`） |
 | `embedding_query(text[, model])` | 1、2 | 検索クエリ（query）向け埋め込みベクトルの生成（`SQLITE_UTF8 \| SQLITE_DIRECTONLY`） |
 | `DISTANCE(left, right)` | 2 | 2つの Float32 ベクトル間のコサイン距離 (0〜2) |
-| `gemma_model_info()` | 0 | 推論・キャッシュ状態の JSON 文字列返却（推論無効時: `{"ready":false}`、有効時: `{"ready":true,"modelId":"google/embeddinggemma-2","dtype":"q4","dimension":768,"backend":...,"fingerprint":...,"functionCalls":...,"cache":{...}}`） |
+| `gemma_model_info()` | 0 | 推論・キャッシュ状態の JSON 文字列返却（推論無効時: `{"ready":false}`、有効時: 既定モデルの `modelId`/`dtype`/`dimension`/`backend`/`fingerprint`、登録モデル一覧 `models`、`functionCalls`、`cache` を含む JSON） |
 
 ### 4.2 方式A: `VECTOR(dim, 'model')` 型定義と自動モデル判断
 
@@ -187,9 +200,9 @@ SQL 文中で `embedding(text)` や `embedding_query(text)` の第2引数 `[mode
 
 所有単位はmodule・connection・Stmt・execution generation。同じprepared statementの最初のstepで空cacheを作り、SQLITE_ROW(100)の間だけ維持する。DONE、step error、reset、finalize、DB closeで破棄する。reset/rebind/暗黙再実行ではgenerationを増やす。複数文exec、transaction、同じSQL文字列をcache共有単位にしない。
 
-keyのidentityは `[modelId,revision,fingerprint,profile,backend,runtimeGeneration]` のJSON tuple。textはidentity文字列、operation、未加工body、`title ?? ""`をJSON tupleにする。imageはidentity、operation、MIME、byte長をtupleにし、さらに画像全bytesを比較する。hashだけの一致、区切り連結を使わない。generic文書とtitle未指定gemma文書は同じkey、query/documentは別key。queryの第2引数もkeyには残る。
+keyのidentityは `[modelId,revision,fingerprint,profile,backend,runtimeGeneration]` のJSON tuple（複数モデル併用時はリクエスト対象モデル名も含めて分離する）。textはidentity文字列、operation、モデル名、未加工body、`title ?? ""`をJSON tupleにする。imageはidentity、operation、モデル名、MIME、byte長をtupleにし、さらに画像全bytesを比較する。hashだけの一致、区切り連結を使わない。generic文書とtitle未指定gemma文書は同じkey、query/documentは別key。queryの第2引数もkeyには残る。
 
-最大10件かつ32MiB。sizeはUTF-8 key長+3072+元画像byte長。hit時は最新へ移す。新規成功値が収まるまで最古から追い出す。1 entryが上限を超えたら正常な結果をcopy返却するがcacheしない。失敗・NULL・不正BLOBは保存しない。hitでもhealth、cancel、deadline、generationを先に検査する。保存値・画像key・返却値はすべてcopyし、外部mutationでcacheが変わらないようにする。
+最大10件かつ32MiB。sizeはUTF-8 key長 + 出力BLOBバイト長（`dimension * 4`） + 元画像byte長。hit時は最新へ移す。新規成功値が収まるまで最古から追い出す。1 entryが上限を超えたら正常な結果をcopy返却するがcacheしない。失敗・NULL・不正BLOBは保存しない。hitでもhealth、cancel、deadline、generationを先に検査する。保存値・画像key・返却値はすべてcopyし、外部mutationでcacheが変わらないようにする。
 
 終了後は内容とbuffer参照を解放しcounterだけを累積する。GCの物理即時消去は保証しない。保持中の entries/bytes は終了時0。破棄済みcacheの再利用は `E_PROTOCOL`。追い出されなければ100行の同一query ORDER BYの実推論は1回。UDF評価回数や走査行数を1回にする保証ではない。0行での不要な推論を強制しない。
 
@@ -226,6 +239,33 @@ WITH q(vector) AS MATERIALIZED(SELECT embedding_query(:query))
 SELECT d.id,c.distance FROM q
 CROSS JOIN document_vectors(q.vector,'{"k":3}') AS c
 JOIN documents AS d ON d.id=c.rowid ORDER BY c.distance,d.id;
+```
+
+複数モデル（例: 日本語特化モデル `ruri-v3` 512次元）を明示指定して利用する場合の構文例は次のとおりである。
+
+```sql
+CREATE TABLE ETOM (
+  ID INTEGER PRIMARY KEY,
+  NAME TEXT,
+  DESCRIPTION TEXT,
+  EMBEDDING VECTOR (512, 'ruri-v3')
+);
+
+INSERT INTO ETOM (ID, NAME, DESCRIPTION, EMBEDDING)
+SELECT
+  ID,
+  NAME,
+  DESCRIPTION,
+  embedding(DESCRIPTION, 'ruri-v3')
+FROM dataset.ETOM_SOURCE;
+
+SELECT
+  ID,
+  NAME,
+  DISTANCE(EMBEDDING, embedding_query('顧客サポート', 'ruri-v3')) AS distance
+FROM ETOM
+ORDER BY distance ASC
+LIMIT 5;
 ```
 
 flat/cosは全件厳密比較。tieは同値として評価し、業務表/vector表の更新削除は公式transactionでatomicに行う。標準SQL parser、optimizer、transaction、SAVEPOINT、bind、結果型を保つ。旧ラッパー固有のSQL文数・queue・行数・export容量制限を通常公式APIへ付加しない。
