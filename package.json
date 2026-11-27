@@ -1,6 +1,6 @@
 {
   "name": "@nojaja/sqlite-vec1-embeddinggemma2-wasm",
-  "version": "0.0.1-alpha.6",
+  "version": "0.0.1-alpha.7",
   "description": "SQLite with official vec1 and ONNX embedding models (default: EmbeddingGemma 2) on WebAssembly runtimes",
   "keywords": [
     "sqlite",

@@ -105,6 +105,7 @@ function createEntry(stagingDir: string): string {
     `export {AutoConfig} from "./${rel}/src/configs.js";`,
     `export {AutoModel} from "./${rel}/src/models/auto/modeling_auto.js";`,
     `export {AutoProcessor} from "./${rel}/src/models/auto/processing_auto.js";`,
+    `export {AutoTokenizer} from "./${rel}/src/models/auto/tokenization_auto.js";`,
     'export {decodeRawImage} from "./src/inference/image.ts";',
     'export {initializeImageCodecs} from "./src/inference/image-codecs.ts";'
   ].join("\n");

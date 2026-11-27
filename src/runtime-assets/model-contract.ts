@@ -87,6 +87,7 @@ export interface ModelManifestProfile {
     document?: string;
   };
   maxTokens?: number;
+  pooling?: "mean" | "cls";
 }
 
 /**

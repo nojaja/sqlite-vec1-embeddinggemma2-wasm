@@ -194,7 +194,8 @@ async function initializeNodeWorker(init: NodeInferenceWorkerInitialization): Pr
     dimension: manifestProfile?.dimension,
     vision: manifestProfile?.vision,
     maxTokens: manifestProfile?.maxTokens,
-    prefix: manifestProfile?.prefix
+    prefix: manifestProfile?.prefix,
+    pooling: manifestProfile?.pooling
   });
 
   return eng;

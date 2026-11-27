@@ -3,6 +3,7 @@ import { MODEL_REPOSITORY, MODEL_REVISION } from "../runtime-assets/model-contra
 import {
   InferenceEngine,
   PortableRuntime,
+  RuntimeInputs,
   RuntimeModel,
   RuntimeProcessor
 } from "./engine";
@@ -43,6 +44,7 @@ export interface InferenceInitializationOptions {
   vision?: boolean | undefined;
   maxTokens?: number | undefined;
   prefix?: TextPrefixConfig | undefined;
+  pooling?: "mean" | "cls" | undefined;
 }
 
 /**
@@ -98,11 +100,13 @@ export async function initializeInferenceEngine(
     config.audio_config = null; // audio 無効化、vision_config は保持
   }
 
-  const processor = (await runtime.AutoProcessor.from_pretrained(modelRepository, {
+  const processor = await loadRuntimeProcessor(
+    runtime,
+    modelRepository,
+    modelRevision,
     config,
-    revision: modelRevision,
-    local_files_only: true
-  })) as RuntimeProcessor;
+    visionEnabled
+  );
 
   const sessionOptions: Record<string, unknown> = {
     enableMemPattern: false
@@ -134,7 +138,8 @@ export async function initializeInferenceEngine(
     dimension,
     maxTokens: options.maxTokens,
     vision: visionEnabled,
-    prefix: options.prefix
+    prefix: options.prefix,
+    pooling: options.pooling
   });
   engine.attach(processor, model);
 
@@ -155,4 +160,59 @@ export async function initializeInferenceEngine(
   }
 
   return engine;
+}
+
+/**
+ * 処理名: プロセッサ／トークナイザロード
+ * 処理概要: vision 対応モデルでは AutoProcessor を、テキスト専用モデルでは AutoTokenizer のみを読み込む。
+ * 実装理由: preprocessor_config.json を持たないテキスト専用モデルで AutoProcessor による 404 SyntaxError を防ぐため。
+ * @param runtime - ポータブルランタイム。
+ * @param modelRepository - モデルリポジトリ名。
+ * @param modelRevision - モデルリビジョン。
+ * @param config - ロード済みモデル設定。
+ * @param visionEnabled - 画像入力対応有無。
+ * @returns RuntimeProcessor 互換オブジェクト。
+ */
+async function loadRuntimeProcessor(
+  runtime: PortableRuntime,
+  modelRepository: string,
+  modelRevision: string,
+  config: unknown,
+  visionEnabled: boolean
+): Promise<RuntimeProcessor> {
+  if (visionEnabled) {
+    return (await runtime.AutoProcessor.from_pretrained(modelRepository, {
+      config,
+      revision: modelRevision,
+      local_files_only: true
+    })) as RuntimeProcessor;
+  }
+
+  if (!runtime.AutoTokenizer || typeof runtime.AutoTokenizer.from_pretrained !== "function") {
+    throw new VectorError("E_ENVIRONMENT");
+  }
+
+  const rawTokenizer = (await runtime.AutoTokenizer.from_pretrained(modelRepository, {
+    revision: modelRevision,
+    local_files_only: true
+  })) as ((
+    text: string,
+    options?: { padding?: boolean; truncation?: boolean }
+  ) => Promise<RuntimeInputs>) & {
+    all_special_tokens?: readonly string[];
+  };
+
+  return Object.assign(
+    async (text: string | null, _image: unknown): Promise<RuntimeInputs> => {
+      if (text === null) {
+        throw new VectorError("E_INPUT");
+      }
+      return rawTokenizer(text, { padding: true, truncation: true });
+    },
+    {
+      tokenizer: {
+        all_special_tokens: rawTokenizer.all_special_tokens ?? []
+      }
+    }
+  );
 }

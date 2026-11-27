@@ -85,7 +85,8 @@ export async function createBrowserEngine(init: BrowserControllerInitialization)
     dimension: manifestProfile?.dimension,
     vision: manifestProfile?.vision,
     maxTokens: manifestProfile?.maxTokens,
-    prefix: manifestProfile?.prefix
+    prefix: manifestProfile?.prefix,
+    pooling: manifestProfile?.pooling
   });
 }
 

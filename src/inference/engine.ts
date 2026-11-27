@@ -17,6 +17,7 @@ export interface EngineProfileConfig {
   maxTokens?: number | undefined;
   vision?: boolean | undefined;
   prefix?: TextPrefixConfig | undefined;
+  pooling?: "mean" | "cls" | undefined;
 }
 
 /**
@@ -69,6 +70,9 @@ export interface PortableRuntime {
   AutoProcessor: {
     from_pretrained: (path: string, options?: unknown) => Promise<unknown>;
   };
+  AutoTokenizer?: {
+    from_pretrained: (path: string, options?: unknown) => Promise<unknown>;
+  };
   AutoModel: {
     from_pretrained: (path: string, options?: unknown) => Promise<unknown>;
   };
@@ -95,6 +99,7 @@ export class InferenceEngine {
   private readonly maxTokens: number;
   private readonly visionEnabled: boolean;
   private readonly prefixConfig: TextPrefixConfig | undefined;
+  private readonly pooling: "mean" | "cls";
   private processor: RuntimeProcessor | null = null;
   private model: RuntimeModel | null = null;
   private isClosed = false;
@@ -112,6 +117,7 @@ export class InferenceEngine {
     this.maxTokens = profileConfig?.maxTokens ?? 2048;
     this.visionEnabled = profileConfig?.vision ?? true;
     this.prefixConfig = profileConfig?.prefix;
+    this.pooling = profileConfig?.pooling ?? "mean";
   }
 
   /**
@@ -223,23 +229,8 @@ export class InferenceEngine {
         }
       }
 
-      const emb = output.sentence_embedding as
-        | { data?: unknown; dims?: readonly number[] }
-        | undefined;
-
-      if (
-        !emb ||
-        !emb.data ||
-        !(emb.data instanceof Float32Array) ||
-        !Array.isArray(emb.dims) ||
-        emb.dims.length !== 2 ||
-        emb.dims[0] !== 1 ||
-        emb.dims[1] !== this.dimension
-      ) {
-        throw new VectorError("E_EMBEDDING_VALUE");
-      }
-
-      return embeddingToBlob(emb.data, emb.dims, this.dimension);
+      const extracted = extractEmbeddingVector(output, inputs, this.dimension, this.pooling);
+      return embeddingToBlob(extracted, [1, this.dimension], this.dimension);
     } catch (err: unknown) {
       if (err instanceof VectorError) {
         throw err;
@@ -272,4 +263,94 @@ export class InferenceEngine {
     this.processor = null;
     this.model = null;
   }
+}
+
+/**
+ * 処理名: 埋め込みベクトル抽出・プーリング
+ * 処理概要: モデル出力から sentence_embedding を直接取得するか、last_hidden_state を Mean / CLS プーリングして抽出する。
+ * 実装理由: sentence_embedding を直接出力しないテキスト専用 ONNX モデル（ruri-v3, BERT 等）に対応するため。
+ * @param output - モデル推論出力マップ。
+ * @param inputs - モデル推論入力（attention_mask 参照用）。
+ * @param dimension - 期待する埋め込み次元数。
+ * @param pooling - プーリング方式（"mean" | "cls"）。
+ * @returns 抽出された [dimension] 長の Float32Array。
+ */
+function extractEmbeddingVector(
+  output: Record<string, unknown>,
+  inputs: RuntimeInputs,
+  dimension: number,
+  pooling: "mean" | "cls"
+): Float32Array {
+  const emb = output.sentence_embedding as
+    | { data?: unknown; dims?: readonly number[] }
+    | undefined;
+
+  if (emb !== undefined) {
+    if (
+      !emb ||
+      !emb.data ||
+      !(emb.data instanceof Float32Array) ||
+      !Array.isArray(emb.dims) ||
+      emb.dims.length !== 2 ||
+      emb.dims[0] !== 1 ||
+      emb.dims[1] !== dimension
+    ) {
+      throw new VectorError("E_EMBEDDING_VALUE");
+    }
+    return emb.data;
+  }
+
+  const hidden = output.last_hidden_state as
+    | { data?: unknown; dims?: readonly number[] }
+    | undefined;
+
+  if (
+    !hidden ||
+    !(hidden.data instanceof Float32Array) ||
+    !Array.isArray(hidden.dims) ||
+    hidden.dims.length !== 3 ||
+    hidden.dims[0] !== 1 ||
+    !Number.isSafeInteger(hidden.dims[1]) ||
+    hidden.dims[1]! < 1 ||
+    hidden.dims[2] !== dimension ||
+    hidden.data.length !== hidden.dims[1]! * dimension
+  ) {
+    throw new VectorError("E_EMBEDDING_VALUE");
+  }
+
+  const seqLen = hidden.dims[1]!;
+  if (pooling === "cls") {
+    return hidden.data.slice(0, dimension);
+  }
+
+  const maskTensor = inputs.attention_mask as
+    | { data?: ArrayLike<number | bigint> }
+    | undefined;
+  const maskData = maskTensor?.data;
+  if (maskData !== undefined && maskData.length < seqLen) {
+    throw new VectorError("E_EMBEDDING_VALUE");
+  }
+
+  const pooled = new Float32Array(dimension);
+  let validTokens = 0;
+  for (let t = 0; t < seqLen; t++) {
+    const isActive = maskData === undefined || Number(maskData[t]) !== 0;
+    if (!isActive) {
+      continue;
+    }
+    validTokens++;
+    const offset = t * dimension;
+    for (let d = 0; d < dimension; d++) {
+      pooled[d]! += hidden.data[offset + d]!;
+    }
+  }
+
+  if (validTokens === 0) {
+    throw new VectorError("E_EMBEDDING_VALUE");
+  }
+
+  for (let d = 0; d < dimension; d++) {
+    pooled[d]! /= validTokens;
+  }
+  return pooled;
 }
