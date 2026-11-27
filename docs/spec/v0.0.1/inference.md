@@ -189,7 +189,7 @@ VerifiedModelCacheは、対象モデルマニフェストの `repository` およ
 https://huggingface.co/<repository>/resolve/<revision>/<path>
 ```
 
-複数モデルを同一 Worker 内で保持・切り替える場合は、`MultiModelVerifiedCache`（モデル名または `(repository, revision)` プレフィックスごとに登録された `VerifiedModelCache` をルーティングする複合キャッシュ）を `runtime.env.customCache` へ接続する。これにより、異なるリポジトリ・リビジョンの資材が同一ランタイム内で衝突することなく読み込まれる。
+複数モデルを同一 Worker 内で保持・切り替える場合は、`MultiModelVerifiedCache`（モデル名または `(repository, revision)` プレフィックスごとに登録された `VerifiedModelCache` をルーティングする複合キャッシュ）を `runtime.env.customCache` へ接続する。これにより、異なるリポジトリ・リビジョンの資材が同一ランタイム内で衝突することなく読み込まれる。なお、`VerifiedModelCache` は第3引数 `repoOptions` 省略時に `strictAllowlist = true`（EmbeddingGemma 2 参照11資材固定）とみなすため、`prepareBrowserInference` および `prepareNodeModelCache` を経由して `VerifiedModelCache` を生成する際は、必ず対象マニフェスト由来の `repository`、`revision`、および `strictAllowlist`（`repository === MODEL_REPOSITORY`）を `repoOptions` として引き渡さなければならない。
 
 未知keyはmiss。matchのたびにcopyとsize/hash照合を行い、Content-Lengthと定義MIMEの新しいResponseを返す。putはbounded readで同じdigestを確認するだけで、永続storeやready状態を変えない。
 
@@ -231,7 +231,7 @@ browser controllerはinitialize/inference/closeをPromise chainに直列化し�
 2. **モデルレジストリとオンデマンド初期化（`inference-browser.ts` / `inference-node.ts`）**:
    - Worker 側は `Map<string, { config, engine?: InferenceEngine }>` としてモデルレジストリと `MultiModelVerifiedCache` を所有する。
    - 初期化フェーズでは `defaultModel`（および `preload === true` のモデル）のみを即座に OPFS / Node キャッシュ準備・`InferenceEngine` 生成・ウォームアップまで完了させて `READY` を公開する。
-   - 推論要求（`handleInferenceRequest`）の `msg.model` で未ロードの登録済みモデル（例: `'ruri-v3'`）が指定された場合、Worker はその場で該当モデルの `PersistentModelCache`（OPFS `.svw-models/models/<modelId>/<artifactSetHash>/` または Node キャッシュ）を初期化・資材取得し、`MultiModelVerifiedCache` へ登録した上で `InferenceEngine` を生成・ウォームアップし、レジストリへ保持してから推論を実行する（以降の同一モデル呼び出しでは既存エンジンを再利用する）。
+   - 推論要求（`handleInferenceRequest`）の `msg.model` で未ロードの登録済みモデル（例: `'ruri-v3'`）が指定された場合、Worker はその場で該当モデルの `PersistentModelCache`（OPFS `.svw-models/models/<modelId>/<artifactSetHash>/` または Node キャッシュ、`strictAllowlist: manifest.repository === MODEL_REPOSITORY`）を初期化・資材取得し、`prepareBrowserInference` / `prepareNodeModelCache` へ `repository`・`revision`・`strictAllowlist` を渡して生成した `VerifiedModelCache`（`createBrowserEngine` では `prepared.cache` をそのまま再利用し二重生成しない）を `MultiModelVerifiedCache` へ登録した上で `InferenceEngine` を生成・ウォームアップし、レジストリへ保持してから推論を実行する（以降の同一モデル呼び出しでは既存エンジンを再利用する）。これにより、アセット数が 11 ではないカスタムモデル（`ruri-v3` 等）でも `validateModelAssets` での `E_ASSET_INTEGRITY` 誤検知なく起動・切替できる。
    - オンデマンドロード中のキャッシュ破損・ネットワーク失敗・オフライン不足等は対応する `VectorError`（`E_ASSET_INTEGRITY`, `E_MODEL_CACHE_MISS`, `E_INFERENCE` 等）として応答へ返し、他のロード済みモデルセッションを巻き込んで破損させない。
    - `msg.model` が登録済みモデル集合に存在しない場合は `E_INPUT` を返す。
    - 各モデルエンジンはそのモデルの次元数（例: `ruri-v3` なら 512 次元 = 2048 バイト）の `Float32` BLOB を生成し、`publishResponse` が `header[1] = dim * 4`、`header[3] = dim` として SAB へ書き込む。
