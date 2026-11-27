@@ -5,17 +5,27 @@
 本パッケージは、標準サポートされる参照モデル（EmbeddingGemma-2）と、アプリケーション主導で任意の ONNX 埋め込みモデル（ruri-v3, bekko 等）を動的に利用可能なモデルプロファイル機構の双方に対応する。
 また、npm パッケージ配布物（tarball）内には大容量のモデル資材（約300MB）を含めない（ゼロバンドル）。資材の配備およびネットワーク利用は以下の2系統を提供する：
 
-1. **参照モデル（EmbeddingGemma-2）**: 組込みの公式初期化（`initialize({ embedding: ... })`）において、`network: "allow"` での安全なストリーム HTTP 取得による永続キャッシュ構築、または `network: "offline"` での完全ローカルキャッシュ運用（外部通信完全遮断）に対応する。事前配置用ツールとして `scripts/download-assets.mjs` も提供される。
+1. **参照モデル（EmbeddingGemma-2）および追加マニフェストモデル（ruri-v3 等）**: 組込みの公式初期化（`initialize({ embedding: ... })`）において、`manifests/` 配下のマニフェスト（`embeddinggemma2-q4.json`, `ruri-v3.json` 等）または外部 URL で指定されたマニフェストを読み込み、`network: "allow"` 時は安全なストリーム HTTP 取得による永続キャッシュ構築、`network: "offline"` 時は完全ローカルキャッシュ運用（外部通信完全遮断）に対応する。事前配置用ツールとして `scripts/download-assets.mjs` も提供される。
 2. **動的モデルプロファイル（任意ローカルモデル）**: アプリケーション側がローカルに任意モデルを事前配置し、`registerEmbeddingExtension` 経由で推論を統合する（完全オフライン・ゼロダウンロード動作）。
 
-### 1.1 動的モデルプロファイル (ModelProfileDefinition)
+### 1.1 動的モデルプロファイルと汎用マニフェスト検証
 
-ライブラリ内部にモデルのハードコードを持たず、アプリ側から動的に設定を注入する：
-- `name`: モデル識別名（例: `'ruri-v3'`, `'embeddinggemma-2'`, `'bekko-v1'`）
-- `path`: アプリ側で事前配置されたローカルモデルディレクトリパス
-- `dimension`: 埋め込み次元数（例: 256, 512, 768）。省略時は `config.json` 等から自動検出可能。
+ライブラリ内部に特定モデルのハードコード（固定 `MODEL_ID`・固定 `MODEL_REPOSITORY`・固定 `MODEL_REVISION`・固定11資材比較）を持たず、マニフェスト JSON または `ModelProfileDefinition` から動的にモデル仕様を解決・検証する：
+- `name` / `modelId`: モデル識別名（例: `'ruri-v3'`, `'embeddinggemma-2'`, `'bekko-v1'`）
+- `path` / `repository`・`revision`: ローカル配置パスまたはマニフェストが指すモデルリポジトリ・不変リビジョン
+- `dimension`: 埋め込み次元数（例: 256, 512, 768）。マニフェストの `profile.dimension` で必須指定（1以上の整数、8192B SAB 上限内では最大 2040 次元）。
+- `dtype`: 量子化・精度形式（例: `'q4'`, `'q8'`, `'fp32'`）。マニフェストの `profile.dtype` に従う。
+- `vision`: 画像入力の対応可否（`false` の場合はテキスト専用モデルとして扱い、画像ウォームアップを省略し、画像入力要求には `E_INPUT` を返す）。
 - `normalize`: コサイン類似度向けの L2 正規化（既定: `true`）
-- `prefix`: クエリ用・文書用のプレフィックス定義（モデル仕様に応じた整形）
+- `prefix`: クエリ用・文書用のプレフィックス定義（例: `embeddinggemma-2` は `task: search result | query: ` / `title: ... | text: `、`ruri-v3` は `検索クエリ: ` / `検索文書: ` 等、マニフェストまたはプロファイル定義に従う）。
+
+#### 汎用マニフェストスキーマと完全性検証契約
+`manifests/` 配下のモデルマニフェスト（`embeddinggemma2-q4.json`, `ruri-v3.json` 等）およびユーザー指定の外部 URL マニフェストは、固定モデル名との一致比較ではなく、以下の構造・整合性・SHA-256 チェックサムにより検証する（いずれかの違反は `E_ASSET_INTEGRITY`）：
+1. `schemaVersion === 1`
+2. `modelId`、`repository`、`revision` が非空文字列であること
+3. `artifactSetHash` および `fingerprint` が小文字64桁 hex 文字列であること
+4. `profile` オブジェクトが存在し、`profile.dimension` が正の整数（`1..2040`）、`profile.dtype` が非空文字列であること
+5. `assets` が 1 件以上の非空配列であり、各要素について `path`（空文字・`..`・バックスラッシュ・先頭 `/` を含まない相対パス、重複禁止）、`bytes`（正の safe integer）、`sha256`（小文字64桁 hex）が有効であること（参照モデル `embeddinggemma-2` に対しては下記 1.3 の必須 11 資材の完全集合チェックも維持する）。
 
 ### 1.2 参照モデル定義 (EmbeddingGemma-2)
 
@@ -52,7 +62,7 @@ license evidenceはid=`apache-2.0`、metadataPath=`README.md`、metadataBytes=28
 
 Transformers.js 4.3.1のAutoConfig/AutoProcessor/AutoModelを使う。private runtimeへ検証済みcacheを設定し、`useCustomCache=true`、`useBrowserCache=false`、`useFSCache=false`、`useFS=false`、`allowLocalModels=true`、`allowRemoteModels=false`、`localModelPath="/models/"`、`useWasmCache=false`。ブラウザ推論ワーカー（`src/workers/inference-browser.ts`）および初期化処理（`src/inference/initialize.ts`）においてもこれらを `runtime.env` へ明示的に設定し、ブラウザ環境のデフォルトによるローカルモデル読み込み拒否（`Invalid configuration detected: local models are disabled`）を抑止する。OPFS ルート直下の `.svw-models` ディレクトリを解決して永続キャッシュストレージへ渡す。env.fetchはcache外通信を必ず `E_ASSET_INTEGRITY` で拒否する。local_files_only=trueと固定revisionを全loaderへ渡す。
 
-初期化順はbackend設定、codec、config、audio_config=null、processor、q4 text/vision model、engine attach、query warm-up、image warm-up。vision_configは保持する。feature-extraction pipelineで不要encoderを読む方式にしない。warm-up query本文は `warm up`。共通imageは次の1px PNGで、Node/browserで同じbytesを使う。
+初期化順はbackend設定、codec（vision有効時）、config、audio_config=null（存在時）、processor/tokenizer、model（`profile.dtype`指定）、engine attach、query warm-up、および（vision対応モデルに限り）image warm-up。vision_configは保持する。feature-extraction pipelineで不要encoderを読む方式にしない。`ruri-v3` 等のテキスト専用モデル（`vision === false` または `vision_encoder` 資材を持たないモデル）では、`dtype` にテキストモデル用量子化指定のみを適用し、画像ウォームアップは実行しない（画像入力要求は `E_INPUT` で拒否する）。warm-up query本文は `warm up`。共通imageは次の1px PNGで、Node/browserで同じbytesを使う。
 
 ```text
 iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==
@@ -160,11 +170,11 @@ browserはOPFS handleをsegmentで辿り、Web Lock `svw-model-cache:<hash>` で
 
 ### 5.3 loader cacheと通信
 
-VerifiedModelCacheは次のkeyだけをmanifest論理pathへ完全一致で写像する。
+VerifiedModelCacheは、対象モデルマニフェストの `repository` および `revision` から動的に構築される次の2つのプレフィックスだけをmanifest論理pathへ完全一致で写像する。
 
 ```text
-/models/onnx-community/embeddinggemma-2-ONNX/<path>
-https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/daa72c51243991dfcaf9f9137d2c573d8f7790c0/<path>
+/models/<repository>/<path>
+https://huggingface.co/<repository>/resolve/<revision>/<path>
 ```
 
 未知keyはmiss。matchのたびにcopyとsize/hash照合を行い、Content-Lengthと定義MIMEの新しいResponseを返す。putはbounded readで同じdigestを確認するだけで、永続storeやready状態を変えない。
@@ -179,25 +189,25 @@ DB ownerは同期UDF、推論Workerは非同期modelを所有する。MessageCha
 - **Main Thread（Promiser RPC クライアント）**: `sqlite3EmbeddingWorkerPromiser(config)` が DB Owner Worker（`dist/workers/db-browser.mjs`）を起動し、`open` / `exec` / `close` / `embedding-info` / `shutdown` 等の操作を `postMessage` ベースの非同期 RPC として送信する。
 - **DB Owner Worker（`dist/workers/db-browser.mjs`）**: Dedicated Worker コンテキスト内で `initialize({ embedding })` を実行し、SQLite Wasm 本体と DB 接続を所有する。内部で推論 Worker（`dist/workers/inference-browser.mjs`）を起動し、`MessageChannel` + `SharedArrayBuffer` + `Atomics.wait` を用いて `embedding()` / `embedding_query()` UDF を安全に同期実行する。
 
-request envelopeは `{protocolVersion:1,jobId,requestId,generation,operation,input,responseBuffer}`。jobIdは非空string、requestIdはsafe integer>=1、generationはsafe integer>=0。text inputは `{text,title}`、imageは `{bytes,mime}`。元画像はcopyしcallerのbufferをdetachしない。ArrayBuffer画像はhandlerでUint8Arrayへ変換する。SABをtransfer listに入れない。
+request envelopeは `{protocolVersion:1,jobId,requestId,generation,operation,model?,input,responseBuffer}`。jobIdは非空string、requestIdはsafe integer>=1、generationはsafe integer>=0、modelは任意の非空string（省略時は既定モデル）。text inputは `{text,title}`、imageは `{bytes,mime}`。元画像はcopyしcallerのbufferをdetachしない。ArrayBuffer画像はhandlerでUint8Arrayへ変換する。SABをtransfer listに入れない。
 
-responseはrequestごとに新品8192-byte SAB、先頭32 bytesをInt32Array(8)、残りをpayloadとする。
+responseはrequestごとに新品8192-byte SAB、先頭32 bytesをInt32Array(8)、残り8160 bytes（最大2040次元のFloat32ベクトル）をpayloadとする。
 
 | header index | 契約 |
 | --- | --- |
 | 0 | state: PENDING=0、WRITING=1、OK=2、ERROR=3、ABANDONED=4 |
-| 1 | OKは3072、ERRORは0..4096のpayload長 |
+| 1 | OKは `dim * 4`（4..8160 の 4 の倍数）、ERRORは0..4096のpayload長 |
 | 2 | 成功0、error ID 1..10 |
-| 3 | 成功dimension=768、失敗0 |
+| 3 | 成功時は出力ベクトルの次元数 `dim`（1..2040、例: 512, 768）、失敗時は0 |
 | 4 | protocolVersion=1 |
 | 5..7 | 常に0 |
 
 error IDは1 E_INPUT、2 E_TOKEN_LIMIT、3 E_IMAGE_FORMAT、4 E_IMAGE_LIMIT、5 E_EMBEDDING_VALUE、6 E_INFERENCE、7 E_TIMEOUT、8 E_CANCELLED、9 E_MEMORY、10 E_PROTOCOL。unknown/破損headerはE_PROTOCOL。応答error payloadは通常空で、例外本文を送らない。
 
-writerはCAS PENDING->WRITING成功時だけpayloadとheaderを書き、最後にWRITING->OK/ERRORのCASで公開しnotifyする。readerはterminal stateをatomicに観測した後だけheader検証とpayload copyを行う。wait前の通知を取りこぼさず、最大50msごとに再読取する。
+writerはCAS PENDING->WRITING成功時だけpayloadとheader（`header[1] = payload.byteLength`、`header[3] = errorId === 0 ? payload.byteLength / 4 : 0`）を書き、最後にWRITING->OK/ERRORのCASで公開しnotifyする。reader（`readResponse`）はterminal stateをatomicに観測した後だけheader検証（OK時は `dim > 0 && Number.isSafeInteger(dim) && payloadLen === dim * 4 && payloadLen <= 8160 && errorId === 0`）とpayload copyを行う。wait前の通知を取りこぼさず、最大50msごとに再読取する。
 
 cancel flagは別4-byte SAB。cancel/deadline到達ではPENDINGまたはWRITINGをCASでABANDONEDにする。既にOK/ERRORなら上書きせず結果を読む。既存ABANDONEDのwaitはE_CANCELLED。timeoutによる自分の放棄はE_TIMEOUT。無期限deadline、通常ArrayBuffer、異容量はE_PROTOCOL。使い捨てSABなので遅延writeが次要求へ混入しない。
 
 handlerは異generationのsafe integer要求を応答せず無視し、非致命falseを返す。正常結果NULLはprotocol違反。fatal IDは5/6/9/10で、WorkerをFAILEDへ進めengineを解放する。他の入力errorは同sessionの次要求を許す。session healthは4-byte SAB、READY=1、FAILED=2、CLOSED=3。cache hit前にもREADYを確認し、メッセージloopが停止中でも故障を検出する。
 
-browser controllerはinitialize/inference/closeをPromise chainに直列化し、失敗後のqueueもcatchで処理する。二重initialize、未知control、不正manifestは拒否。controllerの初期化前検証では、`manifest` ヘッダ項目（`modelId === MODEL_ID`、`repository === MODEL_REPOSITORY`、`revision === MODEL_REVISION`、小文字64桁hexの `artifactSetHash` / `fingerprint`、`Array.isArray(manifest.assets)`）を検証し、`manifest.assets.length > 0` の場合は `createEngine` 呼出し前に `validateModelAssets(manifest.assets)` で必須11資材の完全性を検証する。一方、`manifest.assets.length === 0`（`createEngine` をモック注入する単体テスト fixture）の場合は controller 境界では許容し、実ランタイム（`prepareBrowserInference` / `PersistentModelCache`）側で必須11資材の `validateModelAssets` を強制する。また、Worker 側の `inferencePort` は要求の受信（`onmessage`）・開始（`start()`）・終了（`close()`）のみを行い応答は `responseBuffer`（SAB）へ直接書き込むため、`inferencePort` の型検証は `typeof inferencePort.start === "function" && typeof inferencePort.close === "function"` とし、`postMessage` メソッドの存在を必須としない。READYはwarm-up後だけ。close/failureでengineとportを閉じる。session closeの応答待ちは30000ms、そのfinallyでport/Workerを必ず終了する。
+browser controllerはinitialize/inference/closeをPromise chainに直列化し、失敗後のqueueもcatchで処理する。二重initialize、未知control、不正manifestは拒否。controllerの初期化前検証では、固定の `MODEL_ID` / `MODEL_REPOSITORY` / `MODEL_REVISION` 一致比較を行わず、汎用マニフェスト契約に基づき `schemaVersion === 1`、非空文字列の `modelId` / `repository` / `revision`、小文字64桁hexの `artifactSetHash` / `fingerprint`、`profile.dimension`（正の整数）、および `Array.isArray(manifest.assets)` を検証し、`manifest.assets.length > 0` の場合は `createEngine` 呼出し前に `validateModelAssets(manifest.assets)` で全資材の完全性を検証する。一方、`manifest.assets.length === 0`（`createEngine` をモック注入する単体テスト fixture）の場合は controller 境界では許容し、実ランタイム（`prepareBrowserInference` / `PersistentModelCache`）側で資材検証を強制する。複数モデル（`models`）が指定された場合はモデル名ごとの `InferenceEngine` マップを管理し、推論要求の `model` フィールドに応じて対象エンジンへ振り分ける（未指定時は既定エンジンを使用）。また、Worker 側の `inferencePort` は要求の受信（`onmessage`）・開始（`start()`）・終了（`close()`）のみを行い応答は `responseBuffer`（SAB）へ直接書き込むため、`inferencePort` の型検証は `typeof inferencePort.start === "function" && typeof inferencePort.close === "function"` とし、`postMessage` メソッドの存在を必須としない。READYはwarm-up後だけ。close/failureで全engineとportを閉じる。session closeの応答待ちは30000ms、そのfinallyでport/Workerを必ず終了する。
