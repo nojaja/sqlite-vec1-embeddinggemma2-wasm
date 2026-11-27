@@ -123,16 +123,13 @@ export function registerEmbeddingExtension(
         return doInfer(req);
       };
 
+      if (!infer) {
+        return;
+      }
+
       // 3. embedding(input, [model])
       const embeddingFunc = (_ctx: unknown, ...args: unknown[]) => {
-        try {
-          return embeddingSqlValue("embedding", args, infer ? inferWrapper : undefined);
-        } catch (err) {
-          if (!infer && err instanceof VectorError && err.code === "E_EMBEDDING_NOT_READY") {
-            console.warn("Embedding error: E_EMBEDDING_NOT_READY");
-          }
-          throw err;
-        }
+        return embeddingSqlValue("embedding", args, inferWrapper);
       };
 
       db.createFunction({
@@ -150,14 +147,7 @@ export function registerEmbeddingExtension(
 
       // 4. embedding_query(input, [model])
       const embeddingQueryFunc = (_ctx: unknown, ...args: unknown[]) => {
-        try {
-          return embeddingSqlValue("embedding_query", args, infer ? inferWrapper : undefined);
-        } catch (err) {
-          if (!infer && err instanceof VectorError && err.code === "E_EMBEDDING_NOT_READY") {
-            console.warn("Embedding error: E_EMBEDDING_NOT_READY");
-          }
-          throw err;
-        }
+        return embeddingSqlValue("embedding_query", args, inferWrapper);
       };
 
       db.createFunction({

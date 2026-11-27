@@ -103,6 +103,12 @@ export function validateEmbeddingOptions(
       }
     }
   } else if (env.runtime === "browser") {
+    if (!env.worker) {
+      console.warn(
+        "SQLite synchronous embedding UDFs require Atomics.wait and cannot run on the browser main thread. Run initialize({ embedding }) inside a Dedicated Worker or use sqlite3EmbeddingWorkerPromiser()."
+      );
+      throw new VectorError("E_ENVIRONMENT");
+    }
     if (backend === "directml") {
       throw new VectorError("E_ENVIRONMENT");
     }

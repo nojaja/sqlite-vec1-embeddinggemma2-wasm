@@ -184,6 +184,18 @@ async function main(): Promise<void> {
   });
   metafiles.push(r6.metafile);
 
+  // 3.6b dist/workers/db-browser.mjs (ESM)
+  const r6b = await esbuild.build({
+    entryPoints: ["src/workers/db-browser.ts"],
+    outfile: path.resolve(distDir, "workers/db-browser.mjs"),
+    bundle: true,
+    platform: "browser",
+    format: "esm",
+    target: "es2022",
+    metafile: true
+  });
+  metafiles.push(r6b.metafile);
+
   // 3.7 dist/samples/node/index.js (CJS)
   const r7 = await esbuild.build({
     entryPoints: ["samples/node/index.ts"],

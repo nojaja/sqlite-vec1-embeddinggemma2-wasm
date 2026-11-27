@@ -142,3 +142,36 @@ export interface OfficialInferenceSession {
  * 処理名: 公式 worker1 promiser 関数型
  */
 export type sqlite3Worker1Promiser = (options?: unknown) => (...args: unknown[]) => Promise<unknown>;
+
+/**
+ * 処理名: 埋め込み対応 DB Worker Promiser 設定型
+ * 処理概要: メインスレッドから Dedicated DB Worker を起動する際の設定を受け取る。
+ * 実装理由: ブラウザメインスレッドで安全に embedding UDF を含む SQL を非同期 RPC 実行するため。
+ */
+export interface EmbeddingWorkerPromiserConfig {
+  embedding?: EmbeddingOptions;
+  dbWorkerUrl?: string;
+  onready?: () => void;
+  onerror?: (error: unknown) => void;
+}
+
+/**
+ * 処理名: 埋め込み対応 DB Worker Promiser 応答型
+ * 処理概要: Dedicated DB Worker からの RPC 応答ペイロードを表す。
+ * 実装理由: 公式 Worker1 Promiser と互換性のある応答形式を提供するため。
+ */
+export interface EmbeddingWorkerPromiserResponse {
+  type: string;
+  messageId?: string;
+  result: Record<string, unknown>;
+}
+
+/**
+ * 処理名: 埋め込み対応 DB Worker Promiser 関数型
+ * 処理概要: RPC メッセージ種別と引数を送信し、Worker 実行結果の Promise を返す。
+ * 実装理由: メインスレッドから非同期に DB 操作および推論実行を行うため。
+ */
+export type EmbeddingWorkerPromiser = (
+  type: string,
+  args?: Record<string, unknown>
+) => Promise<EmbeddingWorkerPromiserResponse>;

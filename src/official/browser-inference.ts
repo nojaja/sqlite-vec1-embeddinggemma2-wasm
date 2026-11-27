@@ -19,18 +19,20 @@ import type { OfficialInferenceSession } from "./types";
  */
 export interface OfficialBrowserAssets {
   worker: string;
+  dbWorker: string;
   manifest: string;
   modelBase: string;
 }
 
 /**
  * 処理名: ブラウザ資材 URL 解決オプション
- * 処理概要: モデルベース URL、ワーカー URL、マニフェスト URL の任意上書き指定を受け取る。
+ * 処理概要: モデルベース URL、ワーカー URL、DB ワーカー URL、マニフェスト URL の任意上書き指定を受け取る。
  * 実装理由: バンドラー環境や CDN 配信において柔軟に資材 URL を指定可能にするため。
  */
 export interface BrowserAssetResolveOptions {
   modelBaseUrl?: string;
   workerUrl?: string;
+  dbWorkerUrl?: string;
   manifestUrl?: string;
 }
 
@@ -113,6 +115,11 @@ export function resolveOfficialBrowserAssets(
       ? resolveSecureUrl(opts.workerUrl, entryParsed, false)
       : new URL("dist/workers/inference-browser.mjs", packageRoot).href;
 
+  const dbWorker =
+    opts.dbWorkerUrl !== undefined
+      ? resolveSecureUrl(opts.dbWorkerUrl, entryParsed, false)
+      : new URL("dist/workers/db-browser.mjs", packageRoot).href;
+
   const manifest =
     opts.manifestUrl !== undefined
       ? resolveSecureUrl(opts.manifestUrl, entryParsed, false)
@@ -125,6 +132,7 @@ export function resolveOfficialBrowserAssets(
 
   return {
     worker,
+    dbWorker,
     manifest,
     modelBase
   };
