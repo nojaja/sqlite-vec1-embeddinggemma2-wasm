@@ -40,7 +40,7 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
 
 | suite | 主な受入 assertion |
 | :--- | :--- |
-| `browser-worker-controller.test.ts` | READY 前 warm-up、要求直列化、世代不一致、未知 control、manifest ヘッダ検証（非空 assets 時の `validateModelAssets` と unit fixture 空配列許容）、`inferencePort` の `start`/`close` 検証（`postMessage` 非必須）、失敗/close 後の資源回収、health |
+| `browser-worker-controller.test.ts` | READY 前 warm-up、要求直列化、世代不一致、未知 control、manifest ヘッダ検証（非空 assets 時の `validateModelAssets` と unit fixture 空配列許容）、`models` 複数モデル登録・オンデマンドロード・切替、`inferencePort` の `start`/`close` 検証（`postMessage` 非必須）、失敗/close 後の資源回収、health |
 | `browser-worker-build.test.ts` | browser Worker/entry の Node/native 非到達、DirectML Worker の external native |
 | `browser-opfs-cache-storage.test.ts` | bounded write、atomic copy commit、path 拒否、Web Lock、abort/close |
 | `browser-model.test.ts` | HTTPS/loopback・クロスオリジンCDN許可・危険URL拒否、未知 path miss、HTTP非OK・size/hash検証、CORS/credentials |
@@ -67,7 +67,7 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
 | `official-options.test.ts` | 省略、Node main 許可、browser Dedicated Worker 許可、browser main thread 推論指定時の `E_ENVIRONMENT` 早期拒否、matrix、1/1800000 境界、0/NaN/Infinity/unknown 拒否 |
 | `official-public-exports.test.ts` | default initializer、browser named `sqlite3Worker1Promiser` および `sqlite3EmbeddingWorkerPromiser`、廃止 API を公開しない |
 | `official-runtime.test.ts` | 実 SQLite transactions/NULL、`infer` 未指定時の `embedding`/`embedding_query` UDF 未登録（`no such function`）、公式上流準拠の SQL trace 出力（`flags: "ct"` 時の実行 SQL 出力）および `step()` 失敗時 `console.warn`、2 Stmt authorizer、DIRECTONLY、metadata、DISTANCE |
-| `persistent-model-cache.test.ts` | cold stage/ready（初回 `ready.json` 不在時は事前削除なし、既存 `ready.json` 存在時のみ先に削除）、offline 通信 0、corrupt online 修復、明示 recover、別 set/DB 保護 |
+| `persistent-model-cache.test.ts` | cold stage/ready（`models/<modelId>/<artifactSetHash>/` レイアウト、初回 `ready.json` 不在時は事前削除なし、既存 `ready.json` 存在時のみ先に削除）、offline 通信 0、corrupt online 修復、明示 recover、別 set/別モデル/DB 保護 |
 | `profile.test.ts` | 768D/512D 等の動的次元 LE 独立 BLOB、shape/NaN/zero 拒否、exact/動的 prefix/NULL、2048 token、本文/title bytes |
 | `protocol.test.ts` | 通知先行/待機中 publish、動的次元 (`dim * 4 === payloadLen`、例: 512D=2048B / 768D=3072B) 検証、state 放棄、公開済保護、cancel/期限、不正 header/size |
 | `release-audit.test.ts` | 全 severity 0 のみ受理、件数不正/不整合/脆弱性を拒否 |
@@ -125,7 +125,10 @@ unit は 36 ファイル、E2E は 4 ファイル、統合テストを含め `te
    - **スキーマ保持検証**: `SELECT sql FROM sqlite_schema WHERE name = 'docs_vec'` が `CREATE VIRTUAL TABLE docs_vec USING vec1(...)` を保持していること（通常テーブルへのすり替えがない証明）。
    - **実行計画（プラン）検証**: ベクトル検索クエリ（`CROSS JOIN docs_vec(q.vector, ...)`）に対して `EXPLAIN QUERY PLAN` を実行し、`detail` に `VIRTUAL TABLE INDEX` または `USING vec1` が含まれること（仮想テーブルインデックス走査の証明）。
    - **CAPI 直接実行検証**: TS の SQL 前処理ラッパーを介さず、低レベル CAPI（`sqlite3.capi.sqlite3_exec`）で直接 `CREATE VIRTUAL TABLE ... USING vec1` を実行し、`SQLITE_OK` で完了すること（Wasm バイナリ単体での vec1 静的組み込みの証明）。
-6. **複数埋め込みモデル（`ruri-v3` 等）動的利用検証**:
-   - `models` オプションまたは外部/ローカルマニフェストにより `ruri-v3`（512次元）等の他モデルが登録可能であること。
-   - `CREATE TABLE ETOM (ID INTEGER PRIMARY KEY, NAME TEXT, DESCRIPTION TEXT, EMBEDDING VECTOR (512, 'ruri-v3'));` が受理され、`embedding(DESCRIPTION, 'ruri-v3')` および `embedding_query('顧客サポート', 'ruri-v3')` が 512 次元（2048 バイト）の Float32 BLOB を返却し、`DISTANCE` による近傍検索が完了すること。
+6. **複数埋め込みモデル（`ruri-v3` 等）動的利用検証および `VECTOR(dim, 'model')` スキーマ整合性検証**:
+   - `initialize({ embedding: { models: { 'ruri-v3': { ... } }, defaultModel: '...' } })` により `ruri-v3`（512次元）等の他モデル（Hugging Face リポジトリ、ONNX パス、次元数、Tokenizer/prefix 設定を含むマニフェストまたはインライン設定）が登録可能であること。
+   - ブラウザ Worker（`inference-browser.mjs`）および Node Worker（`inference-node.js`）において、`embedding(text, 'ruri-v3')` 呼び出し時に該当モデルの ONNX 資材を OPFS（`.svw-models/models/<modelId>/<artifactSetHash>/`）または Node キャッシュへ動的ロード・キャッシュし、推論セッションを切り替えて 512 次元（2048 バイト）の Float32 BLOB を出力できること。
+   - `CREATE TABLE ETOM (ID INTEGER PRIMARY KEY, NAME TEXT, DESCRIPTION TEXT, EMBEDDING VECTOR (512, 'ruri-v3'));` が受理され、`embedding(DESCRIPTION, 'ruri-v3')` および `embedding(DESCRIPTION)`（第 2 引数省略時の Authorizer カラムコンテキスト自動解決）、`embedding_query('顧客サポート', 'ruri-v3')` が 512 次元（2048 バイト）の Float32 BLOB を返却し、`DISTANCE` による近傍検索が完了すること。
+   - `VECTOR(512, 'ruri-v3')` 列に対して、異なるモデルを指定した `embedding(text, 'embeddinggemma-2')`（または他モデル由来のベクトル）を INSERT / UPDATE した場合に `E_MODEL_MISMATCH` が送出されること。
+   - `VECTOR(512, 'ruri-v3')` 列に対して、異なる次元数（例: 768 次元 = 3072 バイト）の BLOB を INSERT / UPDATE した場合に `E_EMBEDDING_VALUE` が送出されること。
    - 登録されていない未知のモデル名が指定された場合に `E_INPUT` が送出されること。

@@ -4,7 +4,7 @@
 
 通常接続は公式SQLiteのmemory、kvvfs、OPFS、OPFS-WL、SAH poolを上流どおり利用する。非空DBをモデル未bindとして拒否したり、管理表を追加したりしない。利用者transaction、pragma、trace、authorizerも公式契約を維持する。
 
-embedding有効moduleでopenする接続だけは、open時のauto-extension内で同一接続のmetadataを検証する。read/write可能な新規空DBを標準とする。モデルの異なる生BLOBを利用者が直接INSERTしたことまでは検知できない。モデル空間の整合はDB単位のmetadataと利用者の保存ルールの両方で守る。
+embedding有効moduleでopenする接続だけは、open時のauto-extension内で同一接続のmetadataを検証する。read/write可能な新規空DBを標準とする。また、`VECTOR(dim[, 'model'])` 列を持つテーブルに対しては、INSERT / UPDATE 時に次元数（`dim * 4` バイト一致、`E_EMBEDDING_VALUE`）および `embedding()` / `embedding_query()` 生成ベクトルのモデル名一致（`E_MODEL_MISMATCH`）を検証し、意図しないモデルや次元数のベクトル混入を防止する。モデル空間の整合はDB単位のmetadata・`VECTOR` 列スキーマ検証・利用者の保存ルールの三層で守る。
 
 ## 2. 正確な保存形式
 
@@ -48,7 +48,7 @@ metadata初期bind後にauthorizerを設置する。引数の先頭2つの名前
 
 SAH poolの所有・排他は公式VFSの実装に委ね、同じorigin/directoryを別ownerから同時利用しない。demoのclearOnInit=trueは隔離originでの公式demo契約であり、製品sampleの非破壊設定とは別。kvvfs/sessionやOPFS-WLを推奨DB保存方式に読み替えない。
 
-モデルcacheは `.svw-models`、業務DBのpool領域とは別。moduleのpool追跡は自分がinstallして返されたpoolだけとする。終了処理でremoveVfs/wipeFiles/clearOnInitを呼ばない。容量不足や初期化失敗で既存データを消して再作成しない。
+モデルcacheは `.svw-models`（内部は `models/<modelId>/<artifactSetHash>/` 単位で複数モデルを共存保持）、業務DBのpool領域とは別。moduleのpool追跡は自分がinstallして返されたpoolだけとする。終了処理でremoveVfs/wipeFiles/clearOnInitを呼ばない。容量不足や初期化失敗で既存データを消して再作成しない。
 
 HTTPS/信頼されたlocalhost、COOP=same-origin、COEP=require-corp、crossOriginIsolated、SAB、対応Wasm機能を必要とする。Wasm MIMEはapplication/wasm、CSPは配置したscript/worker/connectとwasm-unsafe-evalに限定し、任意blob/eval Workerを前提にしない。quota/eviction/サイトデータ削除を永続保存保証の例外として扱い、利用アプリがstorage estimateと明示backupを管理する。
 

@@ -32,16 +32,43 @@ browserには公式互換の `sqlite3Worker1Promiser` に加え、推論有効�
 
 ```typescript
 type Backend = "wasm" | "webgpu" | "directml";
+interface ModelAssetConfig {
+  path: string;
+  bytes?: number;
+  sha256?: string;
+  role?: string;
+}
 interface ModelConfigOptions {
+  /** 外部またはパッケージ内マニフェスト JSON の URL / パス */
   manifestUrl?: string;
+  /** インラインで指定する完全マニフェストオブジェクト */
   manifest?: Record<string, unknown>;
+  /** Hugging Face リポジトリ ID（例: "cl-nagoya/ruri-v3-310m" 等） */
+  repository?: string;
+  /** 不変リビジョン（コミットハッシュまたはタグ） */
+  revision?: string;
+  /** モデル取得元ベース URL（末尾 '/' 必須） */
   baseUrl?: string;
+  /** モデル個別のネットワークポリシー（省略時は上位 embedding.model.network を継承） */
   network?: "allow" | "offline";
+  /** モデル個別のキャッシュディレクトリ（Node 用） */
   cacheDirectory?: string;
+  /** 出力ベクトル次元数（例: 512, 768） */
   dimension?: number;
+  /** 量子化・精度形式（例: "q4", "q8", "fp32"） */
   dtype?: string;
+  /** 画像入力対応可否（既定: false、embeddinggemma-2 は true） */
+  vision?: boolean;
+  /** 最大トークン数（既定: 2048） */
+  maxTokens?: number;
+  /** ONNX ファイルおよび Tokenizer 等のアセット定義（簡易指定時は ONNX パス配列または ModelAssetConfig 配列） */
+  assets?: (string | ModelAssetConfig)[];
+  /** query / document 用の入力プレフィックス設定 */
   prefix?: { query?: string; document?: string };
+  /** L2 正規化の有無（既定: true） */
   normalize?: boolean;
+  /** 起動時に即時ロード・ウォームアップするか（既定: defaultModel は true、他は false で初回呼び出し時オンデマンドロード） */
+  preload?: boolean;
 }
 interface EmbeddingOptions {
   backend?: Backend;
@@ -50,7 +77,9 @@ interface EmbeddingOptions {
   manifestUrl?: string;
   initTimeoutMs?: number;
   sqlTimeoutMs?: number;
+  /** 利用可能モデルのマニフェスト/設定マップ（例: { 'ruri-v3': { ... } }） */
   models?: Record<string, ModelConfigOptions | string>;
+  /** 引数省略時および既定コンテキストで使用するモデル名（未指定時は 'embeddinggemma-2' または models の先頭） */
   defaultModel?: string;
 }
 type ProductInitOptions = Record<string, unknown> & {
@@ -108,7 +137,7 @@ declare function sqlite3EmbeddingWorkerPromiser(
 
 Nodeの他OS・architecture・major版は `E_ENVIRONMENT`。未知backend、`auto`、`gpu`、`dml`は `E_INPUT`。browserのWebGPU対応は実adapter/device取得を必要とし、`navigator.gpu`の存在だけで合格にしない。Chrome、macOS、ARM、NPU、CUDA、複数GPUは保証対象ではない。
 
-`network`は厳密にallow/offline。`baseUrl`はHTTPSまたはlocalhost・127.0.0.1・[::1]のHTTP、末尾 `/` 必須、userinfo/query/fragment禁止。Node・browserともに`models`未指定時の既定参照モデルは`embeddinggemma-2`（`https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/daa72c51243991dfcaf9f9137d2c573d8f7790c0/`）とし、`models`や`manifestUrl`で`ruri-v3`等の他モデルが指定された場合は各マニフェスト（`manifests/*.json`または安全なURLの外部マニフェスト）の`repository`・`revision`・`assets`に基づいて取得元を解決する。browser環境でも上記安全URL契約を満たす外部CDN（クロスオリジン）からのオンデマンドモデル取得を許可する（マニフェスト記載の全資材のSHA-256・バイトサイズ照合により完全性を担保する）。一方、browserの推論Worker・ORT Wasm・コーデックWasm等の実行資材は`entryUrl`基準または明示`workerUrl`（安全なURL・相対URL解決可）から解決する。環境変数でモデルIDやrevisionを差し替えない。
+`network`は厳密にallow/offline。`baseUrl`はHTTPSまたはlocalhost・127.0.0.1・[::1]のHTTP、末尾 `/` 必須、userinfo/query/fragment禁止。Node・browserともに`models`未指定時の既定参照モデルは`embeddinggemma-2`（`https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/daa72c51243991dfcaf9f9137d2c573d8f7790c0/`）とし、`models`や`manifestUrl`で`ruri-v3`等の他モデルが指定された場合は各マニフェスト（`manifests/*.json`、安全なURLの外部マニフェスト、または`ModelConfigOptions`のインライン定義）の`repository`・`revision`・`assets`に基づいて取得元を解決する。`models`に複数モデルが登録された場合、`defaultModel`（未指定時は`embeddinggemma-2`、ただし`models`のみ指定され`embeddinggemma-2`が含まれない場合は先頭エントリ）を初期化時にロード・warm-upし、他モデル（`preload: true`指定モデルを除く）は`embedding(text, model)`等の初回呼び出し時に推論Worker内で動的にキャッシュ取得・セッション初期化を行う（オンデマンドロード）。browser環境でも上記安全URL契約を満たす外部CDN（クロスオリジン）からのオンデマンドモデル取得を許可する（マニフェスト記載の全資材のSHA-256・バイトサイズ照合により完全性を担保する）。一方、browserの推論Worker・ORT Wasm・コーデックWasm等の実行資材は`entryUrl`基準または明示`workerUrl`（安全なURL・相対URL解決可）から解決する。環境変数でモデルIDやrevisionを差し替えない。
 
 初期化期限は600000ms、SQL期限は120000msが既定。いずれも有限数かつ閉区間 `[1,1800000]`。現行validatorは整数に限定しない。nullish値は既定に展開する。範囲外、NaN、Infinityは `E_INPUT`。
 
@@ -133,7 +162,7 @@ vec1 は C の static auto-extension（`sqlite3_wasm_extra_init.c` による `sq
 | `embedding(text[, model])` | 1、2 | 文書（document）向け埋め込みベクトルの生成（`SQLITE_UTF8 \| SQLITE_DIRECTONLY`） |
 | `embedding_query(text[, model])` | 1、2 | 検索クエリ（query）向け埋め込みベクトルの生成（`SQLITE_UTF8 \| SQLITE_DIRECTONLY`） |
 | `DISTANCE(left, right)` | 2 | 2つの Float32 ベクトル間のコサイン距離 (0〜2) |
-| `gemma_model_info()` | 0 | 推論・キャッシュ状態の JSON 文字列返却（推論無効時: `{"ready":false}`、有効時: 既定モデルの `modelId`/`dtype`/`dimension`/`backend`/`fingerprint`、登録モデル一覧 `models`、`functionCalls`、`cache` を含む JSON） |
+| `gemma_model_info()` | 0 | 推論・キャッシュ状態の JSON 文字列返却（推論無効時: `{"ready":false}`、有効時: 既定モデルの `modelId`/`dtype`/`dimension`/`backend`/`fingerprint`、登録モデル一覧 `models`（各モデルの `dimension`/`dtype`/`loaded` 状態）、`functionCalls`、`cache` を含む JSON） |
 
 ### 4.2 方式A: `VECTOR(dim, 'model')` 型定義と自動モデル判断
 
@@ -184,6 +213,21 @@ SQL 文中で `embedding(text)` や `embedding_query(text)` の第2引数 `[mode
   - なお、実 SQLite CAPI における `SQLITE_DELETE`（`9`）は `arg1` にテーブル名のみを渡し `arg2`（カラム名）は常に `null`/`undefined` となるため、`resolveModelFromAuthorizer` では `arg1`（テーブル名）と `arg2`（カラム名）の双方が非空文字列として存在し、かつ `actionCode === 23 || actionCode === 9` である通知を UPDATE 対象カラム通知として扱うことで、実 SQLite ランタイムの `SQLITE_DELETE` と混同することなく単体テスト契約（`vector-type-and-model-resolution-spec.test.ts`）および実 CAPI 動作の双方を満たす。
 - **曖昧時のフォールバック原則**:
   - サブクエリ、複雑な式、CTE、または複数 VECTOR カラムの同時更新等により SQLite の標準コンテキスト通知から代入先カラムまたはモデルが一意に特定できない文脈では、無理な独自構文推定を行わず、後続の優先順位（「3. DB 内の一意モデル」「4. デフォルトモデル設定」）へフォールバックする。確定できない場合は安全に `E_MODEL_UNBOUND` を送出する。
+
+#### 4.2.3 `VECTOR(dim, 'model')` 型整合性チェック（スキーマバリデーション）
+テーブル定義に `VECTOR(dim[, 'model'])` が指定された列へベクトルを INSERT / UPDATE する際、意図しないモデルや次元数のベクトルが混入して検索不能・サイレント不整合になることを防ぐため、以下の 2 段階のスキーマバリデーションを提供する。
+
+1. **モデル名整合性検証 (`E_MODEL_MISMATCH`)**:
+   - `VECTOR(dim, 'model')`（例: `VECTOR(512, 'ruri-v3')`）とモデル名が宣言されている列に対して、`embedding(text, 'other-model')` または `embedding_query(text, 'other-model')` のように宣言モデルと異なるモデルが明示指定された場合、あるいは `INSERT ... SELECT` 等で他モデルによって生成されたベクトル BLOB が代入されようとした場合、即座に `VectorError("E_MODEL_MISMATCH")` を送出して文の実行を拒否する。
+   - **実装方法**:
+     - `registration.ts` は `sqlite_schema` / `PRAGMA table_info` から DB 内の全 `VECTOR` 列メタデータ（`tableName`, `columnName`, `dimension`, `modelName`）を収集・保持し、`CREATE TABLE` / `ALTER TABLE` / `DROP TABLE` 実行時に自動リフレッシュする。
+     - `sqlite3_prepare_v2` 時に発火する Authorizer 通知シーケンスから対象ステートメントの INSERT/UPDATE ターゲット列を確定し、`embedding()` / `embedding_query()` 呼び出し時に（第 2 引数が省略されている場合は 4.2.2 の優先順位で自動解決し、明示されている場合は）ターゲット列の `modelName` との一致を検証する。
+     - さらに `embedding()` / `embedding_query()` が返却する `Uint8Array`（および `StatementEmbeddingCache` からのコピー返却値）の生成元モデル名・次元数をステートメント単位のメタデータマップ（`WeakMap<Uint8Array, { model: string; dimension: number }>` またはバインド追跡）に記録し、他文や `INSERT ... SELECT` 経由で渡された場合でもターゲット列の `modelName` と不一致であれば `E_MODEL_MISMATCH` を送出する。
+2. **次元数・バイト長整合性検証 (`E_EMBEDDING_VALUE`)**:
+   - `VECTOR(dim[, 'model'])` が宣言されている列に対して INSERT / UPDATE される値（NULL を除く、`embedding()` の戻り値および `sqlite3_bind_blob` や `zeroblob()` 等で直接投入される生 BLOB を含む）のバイト長が `dim * 4` と一致しない場合（例: 512 次元の列に 768 次元 = 3072 バイトの BLOB を代入）、`VectorError("E_EMBEDDING_VALUE")`（または SQLite 制約エラーとして `E_EMBEDDING_VALUE`）を送出して拒否し、トランザクションをロールバック可能にする。
+   - **実装方法**:
+     - `embedding()` / `embedding_query()` 経由の代入では、UDF 境界およびバインド／ステップ境界でターゲット列の `dimension` と `blob.byteLength === dimension * 4` を検証する。
+     - 直接の生 BLOB 代入（`INSERT INTO T VALUES (1, :blob)` 等）についても取りこぼしなく検証するため、SQLite の `sqlite_schema`（永続スキーマ文字列）を一切改変しない方式として、`VECTOR(dim, ...)` 列を持つテーブルに対して `sqlite_temp_schema` 上の一時検証トリガー（`CREATE TEMP TRIGGER _svw_chk_<tbl>_ins BEFORE INSERT ON "<tbl>" WHEN NEW."<col>" IS NOT NULL AND (typeof(NEW."<col>") != 'blob' OR length(NEW."<col>") != <dim * 4>) BEGIN SELECT RAISE(ABORT, 'E_EMBEDDING_VALUE'); END;` および同等の `BEFORE UPDATE`）を接続内のメタデータ同期時に自動生成するか、もしくは C レベルの `OP_TypeCheck` で `VECTOR(dim)` のバイト長検証を行う。CAPI エラーメッセージが `'E_EMBEDDING_VALUE'` を含む場合、ラッパー境界で `VectorError("E_EMBEDDING_VALUE")` へ正規化する。
 
 ### 4.3 距離関数 `DISTANCE(left, right)`
 
@@ -284,11 +328,11 @@ SQL期限は最初のstepからの単調時計で、ROW読み出し休止時間�
 | `E_TOKEN_LIMIT` | 最終token上限超過 |
 | `E_IMAGE_FORMAT`, `E_IMAGE_LIMIT` | 形式不正、画像資源上限 |
 | `E_EMBEDDING_NOT_READY` | 未準備の非NULL推論 |
-| `E_EMBEDDING_VALUE` | shape/finite/norm不正。致命的session障害 |
+| `E_EMBEDDING_VALUE` | shape/finite/norm不正、`VECTOR(dim)` 列への異次元 BLOB 代入。致命的session障害 |
 | `E_INFERENCE`, `E_MEMORY`, `E_PROTOCOL` | runtime/Worker、memory、bridge/context故障。自動再実行なし |
 | `E_TIMEOUT`, `E_CANCELLED` | deadline、共有flagまたはprogress停止 |
 | `E_ASSET_INTEGRITY`, `E_MODEL_CACHE_MISS` | 完全性違反、offline不足 |
-| `E_MODEL_MISMATCH`, `E_MODEL_UNBOUND` | 保存空間不一致、非空DB未bind |
+| `E_MODEL_MISMATCH`, `E_MODEL_UNBOUND` | 保存空間不一致、`VECTOR(dim, 'model')` 列への異モデル代入、非空DB未bind |
 | `E_ENVIRONMENT` | 非対応実行環境/EP/機能 |
 | `E_DB_IN_USE` | 生存接続中のmodule close |
 | `E_DATABASE_LOCKED`, `E_STORAGE` | Node保存所有競合、I/O故障 |
