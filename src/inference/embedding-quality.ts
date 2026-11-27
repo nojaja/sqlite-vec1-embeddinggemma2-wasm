@@ -59,13 +59,14 @@ export interface EmbeddingQualityReport {
  * @returns コサイン類似度 (-1..1)。
  */
 function cosineSimilarity(a: Float32Array, b: Float32Array): number {
-  if (a.length !== 768 || b.length !== 768) {
+  const dim = a.length;
+  if (dim === 0 || b.length !== dim) {
     throw new VectorError("E_EMBEDDING_VALUE");
   }
   let dot = 0;
   let normA = 0;
   let normB = 0;
-  for (let i = 0; i < 768; i++) {
+  for (let i = 0; i < dim; i++) {
     const va = a[i]!;
     const vb = b[i]!;
     if (!Number.isFinite(va) || !Number.isFinite(vb)) {

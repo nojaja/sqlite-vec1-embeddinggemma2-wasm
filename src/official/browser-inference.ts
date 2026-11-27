@@ -2,11 +2,11 @@ import { VectorError } from "../errors";
 import { assertInferenceReady } from "../bridge/inference-health";
 import { isSecureBrowserUrl } from "../runtime-assets/browser-model";
 import {
-  MODEL_ID,
   MODEL_REPOSITORY,
   MODEL_REVISION,
-  validateModelAssets,
-  type ModelAssetDigest
+  validateModelManifest,
+  type ModelAssetDigest,
+  type ModelManifestProfile
 } from "../runtime-assets/model-contract";
 import { requestEmbedding, type InferenceRequestPort } from "../workers/db";
 import type { ValidatedEmbeddingOptions } from "./options";
@@ -163,19 +163,7 @@ async function loadBrowserManifest(manifestUrl: string): Promise<BrowserManifest
     throw new VectorError("E_ASSET_INTEGRITY");
   }
 
-  if (
-    !data ||
-    data.modelId !== MODEL_ID ||
-    data.repository !== MODEL_REPOSITORY ||
-    data.revision !== MODEL_REVISION ||
-    typeof data.artifactSetHash !== "string" ||
-    typeof data.fingerprint !== "string" ||
-    !Array.isArray(data.assets)
-  ) {
-    throw new VectorError("E_ASSET_INTEGRITY");
-  }
-
-  validateModelAssets(data.assets);
+  validateModelManifest(data);
   return data as BrowserManifest;
 }
 
@@ -312,6 +300,7 @@ export async function createBrowserInferenceSession(
             requestId: requestIdCounter++,
             generation: 1,
             operation: req.operation,
+            model: req.model,
             body: req.body,
             title: req.title,
             bytes: req.bytes,
@@ -347,18 +336,20 @@ export async function createBrowserInferenceSession(
       }
     },
     identity: {
-      modelId: "embeddinggemma-2",
-      revision: MODEL_REVISION,
+      modelId: manifest.modelId === "google/embeddinggemma-2" ? "embeddinggemma-2" : manifest.modelId,
+      revision: manifest.revision,
       fingerprint: manifest.fingerprint,
-      profile: "embeddinggemma-2/q4/768",
+      profile: `${manifest.modelId === "google/embeddinggemma-2" ? "embeddinggemma-2" : manifest.modelId}/${((manifest as unknown as { profile?: ModelManifestProfile }).profile?.dtype ?? "q4")}/${((manifest as unknown as { profile?: ModelManifestProfile }).profile?.dimension ?? 768)}`,
+      dimension: (manifest as unknown as { profile?: ModelManifestProfile }).profile?.dimension ?? 768,
+      dtype: (manifest as unknown as { profile?: ModelManifestProfile }).profile?.dtype ?? "q4",
       backend: options.backend,
       runtimeGeneration: 1
     },
     information: {
       ready: true,
       modelId: manifest.modelId,
-      dtype: "q4",
-      dimension: 768,
+      dtype: (manifest as unknown as { profile?: ModelManifestProfile }).profile?.dtype ?? "q4",
+      dimension: (manifest as unknown as { profile?: ModelManifestProfile }).profile?.dimension ?? 768,
       backend: options.backend,
       fingerprint: manifest.fingerprint
     }

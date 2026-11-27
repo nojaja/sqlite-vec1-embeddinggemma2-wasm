@@ -21,10 +21,15 @@ async function sha256Hex(data: Uint8Array): Promise<string> {
 }
 
 /**
- * 処理名: 許可されるキャッシュキープレフィックス定数
+ * 処理名: リポジトリ解決オプション型
+ * 処理概要: VerifiedModelCache が対象とするリポジトリ名とリビジョンを指定する。
+ * 実装理由: 複数モデルで異なる Hugging Face リポジトリ・リビジョンプレフィックスを動的に構築するため。
  */
-const PREFIX_LOCAL = `/models/${MODEL_REPOSITORY}/`;
-const PREFIX_REMOTE = `https://huggingface.co/${MODEL_REPOSITORY}/resolve/${MODEL_REVISION}/`;
+export interface VerifiedCacheRepoOptions {
+  repository?: string;
+  revision?: string;
+  strictAllowlist?: boolean;
+}
 
 /**
  * 処理名: VerifiedModelCache クラス
@@ -34,6 +39,8 @@ const PREFIX_REMOTE = `https://huggingface.co/${MODEL_REPOSITORY}/resolve/${MODE
 export class VerifiedModelCache {
   private readonly assetMap = new Map<string, ModelAssetDigest>();
   private readonly reader: (path: string) => Promise<Uint8Array | undefined>;
+  private readonly prefixLocal: string;
+  private readonly prefixRemote: string;
 
   /**
    * 処理名: VerifiedModelCache コンストラクタ
@@ -41,12 +48,20 @@ export class VerifiedModelCache {
    * 実装理由: 読み取りごとのハッシュ検証基盤を構築するため。
    * @param assets - 検証対象の資材ダイジェスト一覧。
    * @param reader - 実資材読み込み非同期関数。
+   * @param repoOptions - 対象モデルのリポジトリ・リビジョン設定（省略時は既定参照モデル）。
    */
   constructor(
     assets: readonly ModelAssetDigest[],
-    reader: (path: string) => Promise<Uint8Array | undefined>
+    reader: (path: string) => Promise<Uint8Array | undefined>,
+    repoOptions?: VerifiedCacheRepoOptions
   ) {
-    validateModelAssets(assets);
+    const repository = repoOptions?.repository ?? MODEL_REPOSITORY;
+    const revision = repoOptions?.revision ?? MODEL_REVISION;
+    const strict = repoOptions?.strictAllowlist ?? (repoOptions?.repository === undefined);
+    this.prefixLocal = `/models/${repository}/`;
+    this.prefixRemote = `https://huggingface.co/${repository}/resolve/${revision}/`;
+
+    validateModelAssets(assets, { strictAllowlist: strict });
     for (const a of assets) {
       this.assetMap.set(a.path, a);
     }
@@ -64,10 +79,10 @@ export class VerifiedModelCache {
     const urlStr = typeof request === "string" ? request : request.url;
     let relPath: string | undefined;
 
-    if (urlStr.startsWith(PREFIX_LOCAL)) {
-      relPath = urlStr.slice(PREFIX_LOCAL.length);
-    } else if (urlStr.startsWith(PREFIX_REMOTE)) {
-      relPath = urlStr.slice(PREFIX_REMOTE.length);
+    if (urlStr.startsWith(this.prefixLocal)) {
+      relPath = urlStr.slice(this.prefixLocal.length);
+    } else if (urlStr.startsWith(this.prefixRemote)) {
+      relPath = urlStr.slice(this.prefixRemote.length);
     } else {
       return undefined;
     }

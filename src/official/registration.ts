@@ -48,6 +48,16 @@ export function registerEmbeddingExtension(
   let functionCalls = 0;
   let closed = false;
 
+  const allowedModels = new Set<string>(["embeddinggemma-2"]);
+  if (options?.models) {
+    for (const key of Object.keys(options.models)) {
+      allowedModels.add(key);
+    }
+  }
+  if (options?.defaultModel) {
+    allowedModels.add(options.defaultModel);
+  }
+
   const originalDB = sqlite3.oo1.DB;
 
   /**
@@ -105,7 +115,7 @@ export function registerEmbeddingExtension(
               title: (r as any).title,
               bytes: (r as any).bytes,
               mime: (r as any).mime,
-              model: undefined
+              model: r.model ?? options?.defaultModel
             });
             if (res instanceof Uint8Array) {
               return res;
@@ -129,7 +139,7 @@ export function registerEmbeddingExtension(
 
       // 3. embedding(input, [model])
       const embeddingFunc = (_ctx: unknown, ...args: unknown[]) => {
-        return embeddingSqlValue("embedding", args, inferWrapper);
+        return embeddingSqlValue("embedding", args, inferWrapper, allowedModels);
       };
 
       db.createFunction({
@@ -147,7 +157,7 @@ export function registerEmbeddingExtension(
 
       // 4. embedding_query(input, [model])
       const embeddingQueryFunc = (_ctx: unknown, ...args: unknown[]) => {
-        return embeddingSqlValue("embedding_query", args, inferWrapper);
+        return embeddingSqlValue("embedding_query", args, inferWrapper, allowedModels);
       };
 
       db.createFunction({

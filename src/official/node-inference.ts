@@ -6,7 +6,11 @@ import { VectorError } from "../errors";
 import type { OfficialInferenceSession } from "./types";
 import type { ValidatedEmbeddingOptions } from "./options";
 import { requestEmbedding } from "../workers/db";
-import { MODEL_REPOSITORY, MODEL_REVISION } from "../runtime-assets/model-contract";
+import {
+  MODEL_REPOSITORY,
+  MODEL_REVISION,
+  type ModelManifestProfile
+} from "../runtime-assets/model-contract";
 
 /**
  * 処理名: Node 推論セッション生成
@@ -23,7 +27,12 @@ export async function createNodeInferenceSession(
   const workerPath = resolve(packageRoot, "dist/workers/inference-node.js");
   const manifestPath = resolve(packageRoot, "manifests/embeddinggemma2-q4.json");
 
-  let manifest: { modelId: string; fingerprint: string };
+  let manifest: {
+    modelId: string;
+    revision?: string;
+    fingerprint: string;
+    profile?: ModelManifestProfile;
+  };
   try {
     manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   } catch {
@@ -92,6 +101,7 @@ export async function createNodeInferenceSession(
           requestId: requestIdCounter++,
           generation: 1,
           operation: req.operation,
+          model: req.model,
           body: req.body,
           title: req.title,
           bytes: req.bytes,
@@ -113,18 +123,20 @@ export async function createNodeInferenceSession(
       }
     },
     identity: {
-      modelId: "embeddinggemma-2",
-      revision: MODEL_REVISION,
+      modelId: manifest.modelId === "google/embeddinggemma-2" ? "embeddinggemma-2" : manifest.modelId,
+      revision: manifest.revision ?? MODEL_REVISION,
       fingerprint: manifest.fingerprint,
-      profile: "embeddinggemma-2/q4/768",
+      profile: `${manifest.modelId === "google/embeddinggemma-2" ? "embeddinggemma-2" : manifest.modelId}/${manifest.profile?.dtype ?? "q4"}/${manifest.profile?.dimension ?? 768}`,
+      dimension: manifest.profile?.dimension ?? 768,
+      dtype: manifest.profile?.dtype ?? "q4",
       backend: options.backend,
       runtimeGeneration: 1
     },
     information: {
       ready: true,
       modelId: manifest.modelId,
-      dtype: "q4",
-      dimension: 768,
+      dtype: manifest.profile?.dtype ?? "q4",
+      dimension: manifest.profile?.dimension ?? 768,
       backend: options.backend,
       fingerprint: manifest.fingerprint
     }

@@ -66,41 +66,170 @@ const ALLOWED_PATH_SET = new Set(MODEL_ASSET_FILES.map((a) => a.path));
 const SHA256_REGEX = /^[0-9a-f]{64}$/;
 
 /**
+ * 処理名: モデル資材検証オプション型
+ * 処理概要: 資材検証時の厳格ホワイトリストモードを制御する。
+ */
+export interface ValidateModelAssetsOptions {
+  strictAllowlist?: boolean;
+}
+
+/**
+ * 処理名: モデルマニフェストプロファイル型
+ * 処理概要: マニフェスト内のモデル仕様（次元数・量子化・画像対応等）を保持する。
+ */
+export interface ModelManifestProfile {
+  dimension: number;
+  dtype: string;
+  vision?: boolean;
+  audio?: boolean;
+  prefix?: {
+    query?: string;
+    document?: string;
+  };
+  maxTokens?: number;
+}
+
+/**
+ * 処理名: 汎用モデルマニフェスト型
+ * 処理概要: モデル識別情報・整合性ハッシュ・プロファイル・資材一覧を保持する。
+ */
+export interface ModelManifest {
+  schemaVersion: number;
+  modelId: string;
+  repository: string;
+  revision: string;
+  artifactSetHash: string;
+  fingerprint: string;
+  profile?: ModelManifestProfile;
+  assets: readonly ModelAssetDigest[];
+}
+
+/**
+ * 処理名: 相対アセットパス安全性検証
+ * 処理概要: トラバーサル・絶対パス・バックスラッシュを含まない有効な論理パスであることを検証する。
+ * @param path - 検証対象パス。
+ * @returns 安全なパスの場合 true。
+ */
+function isSafeAssetPath(path: unknown): path is string {
+  if (typeof path !== "string" || path.length === 0) {
+    return false;
+  }
+  if (path.startsWith("/") || path.includes("\\") || path.includes("..")) {
+    return false;
+  }
+  return !path.includes("%2e") && !path.includes("%2E");
+}
+
+/**
+ * 処理名: 単一資材ダイジェスト検証
+ * 処理概要: 1件の資材レコードについてパス・サイズ・SHA-256 を検証する。
+ * @param asset - 資材レコード。
+ * @param strictAllowlist - EmbeddingGemma 参照11資材への限定有無。
+ * @param seenPaths - 重複検知用セット。
+ */
+function assertSingleAssetValid(
+  asset: ModelAssetDigest,
+  strictAllowlist: boolean,
+  seenPaths: Set<string>
+): void {
+  if (!asset || !isSafeAssetPath(asset.path)) {
+    throw new VectorError("E_ASSET_INTEGRITY");
+  }
+  if (strictAllowlist && !ALLOWED_PATH_SET.has(asset.path)) {
+    throw new VectorError("E_ASSET_INTEGRITY");
+  }
+  if (seenPaths.has(asset.path)) {
+    throw new VectorError("E_ASSET_INTEGRITY");
+  }
+  seenPaths.add(asset.path);
+
+  if (
+    typeof asset.bytes !== "number" ||
+    !Number.isSafeInteger(asset.bytes) ||
+    asset.bytes <= 0 ||
+    asset.bytes > Number.MAX_SAFE_INTEGER
+  ) {
+    throw new VectorError("E_ASSET_INTEGRITY");
+  }
+
+  if (typeof asset.sha256 !== "string" || !SHA256_REGEX.test(asset.sha256)) {
+    throw new VectorError("E_ASSET_INTEGRITY");
+  }
+}
+
+/**
  * 処理名: モデル資材完全性検証
- * 処理概要: 資材配列が厳格に 11 件であり、パス・サイズ・SHA-256 に欠損・重複・不正がないことを検証する。
+ * 処理概要: 資材配列のパス・サイズ・SHA-256 に欠損・重複・不正がないことを検証する。
  * 実装理由: 不正または破損したモデルファイルによる推論異常を未然に遮断するため。
  * @param assets - 検証対象の資材ダイジェスト配列。
+ * @param options - 検証オプション（既定は参照11資材厳格チェック）。
  */
-export function validateModelAssets(assets: readonly ModelAssetDigest[]): void {
-  if (!Array.isArray(assets) || assets.length !== 11) {
+export function validateModelAssets(
+  assets: readonly ModelAssetDigest[],
+  options?: ValidateModelAssetsOptions
+): void {
+  const strict = options?.strictAllowlist ?? true;
+  if (!Array.isArray(assets) || assets.length === 0) {
+    throw new VectorError("E_ASSET_INTEGRITY");
+  }
+  if (strict && assets.length !== 11) {
     throw new VectorError("E_ASSET_INTEGRITY");
   }
 
   const seenPaths = new Set<string>();
   for (const asset of assets) {
-    if (!asset || typeof asset.path !== "string" || !ALLOWED_PATH_SET.has(asset.path)) {
-      throw new VectorError("E_ASSET_INTEGRITY");
-    }
-    if (seenPaths.has(asset.path)) {
-      throw new VectorError("E_ASSET_INTEGRITY"); // 重複拒絶
-    }
-    seenPaths.add(asset.path);
+    assertSingleAssetValid(asset, strict, seenPaths);
+  }
 
+  if (strict && seenPaths.size !== 11) {
+    throw new VectorError("E_ASSET_INTEGRITY");
+  }
+}
+
+/**
+ * 処理名: 汎用モデルマニフェスト検証
+ * 処理概要: マニフェスト JSON のスキーマ構造、必須フィールド、プロファイル次元、および資材配列の整合性を検証する。
+ * 実装理由: 固定モデル比較を撤廃し、ruri-v3 等の任意モデルマニフェストを安全に受理するため。
+ * @param manifest - 検証対象のマニフェストオブジェクト。
+ * @param allowEmptyAssets - 単体テスト境界向けに空アセット配列を許容するか。
+ */
+export function validateModelManifest(manifest: unknown, allowEmptyAssets = false): void {
+  if (!manifest || typeof manifest !== "object") {
+    throw new VectorError("E_ASSET_INTEGRITY");
+  }
+  const m = manifest as Partial<ModelManifest>;
+  if (
+    (m.schemaVersion !== undefined && m.schemaVersion !== 1) ||
+    typeof m.modelId !== "string" ||
+    m.modelId.trim().length === 0 ||
+    typeof m.repository !== "string" ||
+    m.repository.trim().length === 0 ||
+    typeof m.revision !== "string" ||
+    m.revision.trim().length === 0 ||
+    typeof m.artifactSetHash !== "string" ||
+    !SHA256_REGEX.test(m.artifactSetHash) ||
+    typeof m.fingerprint !== "string" ||
+    !SHA256_REGEX.test(m.fingerprint) ||
+    !Array.isArray(m.assets)
+  ) {
+    throw new VectorError("E_ASSET_INTEGRITY");
+  }
+
+  if (m.profile !== undefined) {
     if (
-      typeof asset.bytes !== "number" ||
-      !Number.isSafeInteger(asset.bytes) ||
-      asset.bytes <= 0 ||
-      asset.bytes > Number.MAX_SAFE_INTEGER
+      typeof m.profile !== "object" ||
+      !Number.isSafeInteger(m.profile.dimension) ||
+      m.profile.dimension <= 0 ||
+      m.profile.dimension > 2040 ||
+      typeof m.profile.dtype !== "string" ||
+      m.profile.dtype.trim().length === 0
     ) {
-      throw new VectorError("E_ASSET_INTEGRITY");
-    }
-
-    if (typeof asset.sha256 !== "string" || !SHA256_REGEX.test(asset.sha256)) {
       throw new VectorError("E_ASSET_INTEGRITY");
     }
   }
 
-  if (seenPaths.size !== 11) {
-    throw new VectorError("E_ASSET_INTEGRITY");
+  if (m.assets.length > 0 || !allowEmptyAssets) {
+    const strict = m.modelId === MODEL_ID;
+    validateModelAssets(m.assets, { strictAllowlist: strict });
   }
 }

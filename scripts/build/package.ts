@@ -73,6 +73,14 @@ async function main(): Promise<void> {
     );
   }
 
+  // db-browser.mjs がバンドルする sqlite3-bundler-friendly.mjs は import.meta.url 相対で
+  // sqlite3-opfs-async-proxy.js を解決するため、dist/workers/ 配下にも同梱する
+  fs.mkdirSync(path.resolve(distDir, "workers"), { recursive: true });
+  fs.copyFileSync(
+    path.resolve(rootDir, "downloads/sqlite-official", "sqlite3-opfs-async-proxy.js"),
+    path.resolve(distDir, "workers", "sqlite3-opfs-async-proxy.js")
+  );
+
   // 公式資材に上流バグ修正パッチを適用（未適用時のみ）
   const nodeMjsPath = path.resolve(distDir, "sqlite3-node.mjs");
   const nodeMjsContent = fs.readFileSync(nodeMjsPath, "utf8");

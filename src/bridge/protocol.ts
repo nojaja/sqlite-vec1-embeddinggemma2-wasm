@@ -8,6 +8,7 @@ import { VectorError } from "../errors";
 export interface BridgeResponse {
   payload: Uint8Array;
   errorId: number;
+  dimension?: number;
 }
 
 /**
@@ -18,6 +19,7 @@ export interface BridgeResponse {
 const BUFFER_BYTE_LENGTH = 8192;
 const HEADER_INT32_COUNT = 8;
 const HEADER_BYTE_LENGTH = 32;
+const MAX_OK_PAYLOAD_BYTES = BUFFER_BYTE_LENGTH - HEADER_BYTE_LENGTH;
 const PROTOCOL_VERSION = 1;
 
 const STATE_PENDING = 0;
@@ -58,7 +60,11 @@ export function publishResponse(
     throw new VectorError("E_PROTOCOL");
   }
   if (errorId === 0) {
-    if (payload.byteLength !== 3072) {
+    if (
+      payload.byteLength <= 0 ||
+      payload.byteLength > MAX_OK_PAYLOAD_BYTES ||
+      payload.byteLength % 4 !== 0
+    ) {
       throw new VectorError("E_PROTOCOL");
     }
   } else {
@@ -77,7 +83,7 @@ export function publishResponse(
 
   header[1] = payload.byteLength;
   header[2] = errorId;
-  header[3] = errorId === 0 ? 768 : 0;
+  header[3] = errorId === 0 ? payload.byteLength / 4 : 0;
   header[4] = PROTOCOL_VERSION;
   header[5] = 0;
   header[6] = 0;
@@ -110,16 +116,23 @@ export function readResponse(buffer: SharedArrayBuffer): BridgeResponse {
     throw new VectorError("E_PROTOCOL");
   }
 
-  const payloadLen = header[1];
-  const errorId = header[2];
-  const dim = header[3];
+  const payloadLen = header[1] ?? -1;
+  const errorId = header[2] ?? -1;
+  const dim = header[3] ?? -1;
   const version = header[4];
   if (version !== PROTOCOL_VERSION || header[5] !== 0 || header[6] !== 0 || header[7] !== 0) {
     throw new VectorError("E_PROTOCOL");
   }
 
   if (state === STATE_OK) {
-    if (payloadLen !== 3072 || errorId !== 0 || dim !== 768) {
+    const expectedBytes = dim * 4;
+    if (
+      !Number.isSafeInteger(dim) ||
+      dim <= 0 ||
+      payloadLen !== expectedBytes ||
+      payloadLen > MAX_OK_PAYLOAD_BYTES ||
+      errorId !== 0
+    ) {
       throw new VectorError("E_PROTOCOL");
     }
   } else {
@@ -132,7 +145,9 @@ export function readResponse(buffer: SharedArrayBuffer): BridgeResponse {
   const payloadCopy = new Uint8Array(payloadLen);
   payloadCopy.set(payloadBytes);
 
-  return { payload: payloadCopy, errorId };
+  return state === STATE_OK
+    ? { payload: payloadCopy, errorId, dimension: dim }
+    : { payload: payloadCopy, errorId };
 }
 
 /**

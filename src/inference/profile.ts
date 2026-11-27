@@ -30,41 +30,57 @@ const MAX_TITLE_LENGTH = 1024;
 
 /**
  * 処理名: トークン数制限検証
- * 処理概要: トークン数が安全な非負整数かつモデル上限 (2048) 以内であることを検証する。
+ * 処理概要: トークン数が安全な非負整数かつモデル上限以内であることを検証する。
  * 実装理由: モデル許容量を超えるトークンを安全に拒絶し、不正な型や数値をプロトコルエラーとするため。
  * @param count - 検証対象のトークン数。
+ * @param maxTokens - 許容される最大トークン数（既定: 2048）。
  */
-export function assertTokenLimit(count: number): void {
+export function assertTokenLimit(count: number, maxTokens = 2048): void {
   if (!Number.isSafeInteger(count) || count < 0) {
     throw new VectorError("E_PROTOCOL");
   }
-  if (count > 2048) {
+  if (count > maxTokens) {
     throw new VectorError("E_TOKEN_LIMIT");
   }
 }
 
 /**
+ * 処理名: テキストプレフィックス設定型
+ * 処理概要: query / document 用のプレフィックス文字列を保持する。
+ * 実装理由: モデルごとのプロンプト形式の違いをプロファイル単位で注入可能にするため。
+ */
+export interface TextPrefixConfig {
+  query?: string | undefined;
+  document?: string | undefined;
+}
+
+/**
  * 処理名: 埋め込みベクトルのBLOB変換
- * 処理概要: Float32 出力値を L2 正規化し、リトルエンディアン形式の 3072 バイト Uint8Array に変換する。
- * 実装理由: SQLite BLOB および vec1 仮想テーブルに適合する正規化バイナリを決定論的に生成するため。
+ * 処理概要: Float32 出力値を L2 正規化し、リトルエンディアン形式の Uint8Array に変換する。
+ * 実装理由: 任意の埋め込み次元数に対応し、SQLite BLOB および vec1 に適合する正規化バイナリを生成するため。
  * @param values - モデルが出力した浮動小数点配列。
  * @param shape - 出力テンソルの shape。
- * @returns 3072 バイトの正規化済みバイト配列。
+ * @param dimension - 期待する埋め込み次元数（省略時は 768）。
+ * @returns 正規化済みバイト配列（dimension * 4 バイト）。
  */
 export function embeddingToBlob(
   values: ArrayLike<number>,
-  shape: readonly number[]
+  shape: readonly number[],
+  dimension = EMBEDDING_DIMENSION
 ): Uint8Array {
-  if (shape.length !== 2 || shape[0] !== 1 || shape[1] !== EMBEDDING_DIMENSION) {
+  if (!Number.isSafeInteger(dimension) || dimension <= 0) {
     throw new VectorError("E_EMBEDDING_VALUE");
   }
-  if (values.length !== EMBEDDING_DIMENSION) {
+  if (shape.length !== 2 || shape[0] !== 1 || shape[1] !== dimension) {
+    throw new VectorError("E_EMBEDDING_VALUE");
+  }
+  if (values.length !== dimension) {
     throw new VectorError("E_EMBEDDING_VALUE");
   }
 
   let sumSquares = 0;
-  for (let i = 0; i < EMBEDDING_DIMENSION; i++) {
-    const val = values[i];
+  for (let i = 0; i < dimension; i++) {
+    const val = values[i]!;
     if (!Number.isFinite(val)) {
       throw new VectorError("E_EMBEDDING_VALUE");
     }
@@ -76,10 +92,10 @@ export function embeddingToBlob(
     throw new VectorError("E_EMBEDDING_VALUE");
   }
 
-  const result = new Uint8Array(EMBEDDING_BYTES);
+  const result = new Uint8Array(dimension * 4);
   const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
-  for (let i = 0; i < EMBEDDING_DIMENSION; i++) {
-    const normalized = values[i] / norm;
+  for (let i = 0; i < dimension; i++) {
+    const normalized = values[i]! / norm;
     view.setFloat32(i * 4, normalized, true);
   }
 
@@ -119,31 +135,34 @@ function validateTextContent(text: string, specialTokens: readonly string[]): vo
  * @param body - 本文入力。
  * @param title - ドキュメントタイトル (任意)。
  * @param specialTokens - トークナイザー由来の特殊トークン一覧。
+ * @param prefixConfig - モデル固有のプレフィックス設定 (省略時は EmbeddingGemma 既定形式)。
  * @returns 整形された文字列、または NULL の場合 null。
  */
 export function formatTextInput(
   operation: "query" | "document",
   body: unknown,
   title: unknown,
-  specialTokens: readonly string[]
+  specialTokens: readonly string[],
+  prefixConfig?: TextPrefixConfig
 ): string | null {
   if (body === null) {
     return null;
   }
-  if (typeof body !== "string") {
-    throw new VectorError("E_INPUT");
-  }
-  if (body.trim().length === 0) {
+  if (typeof body !== "string" || body.trim().length === 0) {
     throw new VectorError("E_INPUT");
   }
 
   validateTextContent(body, specialTokens);
 
   if (operation === "query") {
-    return `task: search result | query: ${body}`;
+    const prefix = prefixConfig?.query ?? "task: search result | query: ";
+    return `${prefix}${body}`;
   }
 
   if (operation === "document") {
+    if (prefixConfig?.document !== undefined) {
+      return `${prefixConfig.document}${body}`;
+    }
     let resolvedTitle = "none";
     if (title !== undefined && title !== null && title !== "") {
       if (typeof title !== "string" || title.length > MAX_TITLE_LENGTH) {

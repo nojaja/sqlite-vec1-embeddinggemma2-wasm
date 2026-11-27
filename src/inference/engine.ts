@@ -1,5 +1,23 @@
 import { VectorError, ErrorCode } from "../errors";
-import { assertTokenLimit, embeddingToBlob, formatTextInput } from "./profile";
+import {
+  assertTokenLimit,
+  EMBEDDING_DIMENSION,
+  embeddingToBlob,
+  formatTextInput,
+  TextPrefixConfig
+} from "./profile";
+
+/**
+ * 処理名: エンジンプロファイル設定型
+ * 処理概要: モデルの出力次元数、トークン上限、画像対応可否、テキストプレフィックスを定義する。
+ * 実装理由: 複数モデルで異なる次元数や前処理ルールを InferenceEngine へ注入するため。
+ */
+export interface EngineProfileConfig {
+  dimension?: number | undefined;
+  maxTokens?: number | undefined;
+  vision?: boolean | undefined;
+  prefix?: TextPrefixConfig | undefined;
+}
 
 /**
  * 処理名: ランタイム入力テンソル型
@@ -73,18 +91,27 @@ export type EngineRequest =
  */
 export class InferenceEngine {
   private readonly runtime: PortableRuntime;
+  private readonly dimension: number;
+  private readonly maxTokens: number;
+  private readonly visionEnabled: boolean;
+  private readonly prefixConfig: TextPrefixConfig | undefined;
   private processor: RuntimeProcessor | null = null;
   private model: RuntimeModel | null = null;
   private isClosed = false;
 
   /**
    * 処理名: InferenceEngine コンストラクタ
-   * 処理概要: ランタイムを保持して初期化する。
-   * 実装理由: テスト用モックおよび実ランタイムを注入可能にするため。
+   * 処理概要: ランタイムおよびモデルプロファイル設定を保持して初期化する。
+   * 実装理由: テスト用モックおよび任意次元モデルの設定を注入可能にするため。
    * @param runtime - ポータブルランタイムインスタンス。
+   * @param profileConfig - モデルの次元数・プレフィックス等の設定。
    */
-  constructor(runtime: PortableRuntime) {
+  constructor(runtime: PortableRuntime, profileConfig?: EngineProfileConfig) {
     this.runtime = runtime;
+    this.dimension = profileConfig?.dimension ?? EMBEDDING_DIMENSION;
+    this.maxTokens = profileConfig?.maxTokens ?? 2048;
+    this.visionEnabled = profileConfig?.vision ?? true;
+    this.prefixConfig = profileConfig?.prefix;
   }
 
   /**
@@ -122,12 +149,16 @@ export class InferenceEngine {
         request.operation,
         request.body,
         request.title,
-        this.processor.tokenizer.all_special_tokens
+        this.processor.tokenizer.all_special_tokens,
+        this.prefixConfig
       );
       if (formattedText === null) {
         return null;
       }
     } else if (request.operation === "image") {
+      if (!this.visionEnabled) {
+        throw new VectorError("E_INPUT");
+      }
       try {
         decodedImage = await this.runtime.decodeRawImage(
           request.bytes as Uint8Array,
@@ -173,7 +204,7 @@ export class InferenceEngine {
       if (!inputs.input_ids || !inputs.input_ids.data) {
         throw new VectorError("E_EMBEDDING_VALUE");
       }
-      assertTokenLimit(inputs.input_ids.data.length);
+      assertTokenLimit(inputs.input_ids.data.length, this.maxTokens);
     } catch (tokenErr) {
       for (const d of disposables) {
         try {
@@ -203,12 +234,12 @@ export class InferenceEngine {
         !Array.isArray(emb.dims) ||
         emb.dims.length !== 2 ||
         emb.dims[0] !== 1 ||
-        emb.dims[1] !== 768
+        emb.dims[1] !== this.dimension
       ) {
         throw new VectorError("E_EMBEDDING_VALUE");
       }
 
-      return embeddingToBlob(emb.data, emb.dims);
+      return embeddingToBlob(emb.data, emb.dims, this.dimension);
     } catch (err: unknown) {
       if (err instanceof VectorError) {
         throw err;

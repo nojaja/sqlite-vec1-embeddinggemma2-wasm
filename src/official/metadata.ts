@@ -8,6 +8,8 @@ export interface ModelIdentity {
   revision: string;
   fingerprint: string;
   profile: string;
+  dimension?: number | undefined;
+  dtype?: string | undefined;
   backend?: string;
   runtimeGeneration?: number;
 }
@@ -44,14 +46,14 @@ export function officialMetadataRecord(identity: ModelIdentity): OfficialMetadat
     revision: identity.revision,
     fingerprint: identity.fingerprint,
     profile: identity.profile,
-    dimension: 768,
-    dtype: "q4"
+    dimension: identity.dimension ?? 768,
+    dtype: identity.dtype ?? "q4"
   };
 }
 
 /**
  * 処理名: 公式保存メタデータ検証
- * 処理概要: DB から読み取られたメタデータが現在の identity および固定規約（productVersion: 0.0.3, dimension: 768, dtype: q4）と一致するか検証する。
+ * 処理概要: DB から読み取られたメタデータが現在の identity および固定規約（productVersion: 0.0.3）と一致するか検証する。
  * 実装理由: モデル空間の混在や未対応バージョンのデータベースアクセスを防止するため。
  * @param actual - 実際のメタデータオブジェクト。
  * @param identity - 期待するモデル識別情報。
@@ -70,14 +72,17 @@ export function validateOfficialMetadata(
     throw new VectorError("E_MODEL_MISMATCH");
   }
 
+  const expectedDim = identity.dimension ?? 768;
+  const expectedDtype = identity.dtype ?? "q4";
+
   if (
     rec.productVersion !== "0.0.3" ||
     rec.modelId !== identity.modelId ||
     rec.revision !== identity.revision ||
     rec.fingerprint !== identity.fingerprint ||
     rec.profile !== identity.profile ||
-    rec.dimension !== 768 ||
-    rec.dtype !== "q4"
+    rec.dimension !== expectedDim ||
+    rec.dtype !== expectedDtype
   ) {
     throw new VectorError("E_MODEL_MISMATCH");
   }

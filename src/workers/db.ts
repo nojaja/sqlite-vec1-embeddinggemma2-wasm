@@ -17,6 +17,7 @@ export type DbEmbeddingRequest = {
   jobId: string;
   requestId: number;
   generation: number;
+  model?: string | undefined;
 } & (
   | { operation: "query" | "document"; body: unknown; title?: unknown }
   | { operation: "image"; bytes: unknown; mime: unknown }
@@ -96,6 +97,7 @@ export function requestEmbedding(
     requestId: request.requestId,
     generation: request.generation,
     operation: request.operation,
+    model: request.model,
     input,
     responseBuffer
   };

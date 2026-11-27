@@ -10,7 +10,7 @@ import type { PortableRuntime, InferenceEngine } from "../inference/engine";
 import { createBrowserOpfsPersistentCacheStorage } from "../runtime-assets/browser-opfs-cache-storage";
 import { PersistentModelCache } from "../runtime-assets/persistent-model-cache";
 import { createBrowserModelReader } from "../runtime-assets/browser-model";
-import type { ModelAssetDigest } from "../runtime-assets/model-contract";
+import type { ModelAssetDigest, ModelManifestProfile } from "../runtime-assets/model-contract";
 
 /**
  * 処理名: ブラウザ推論ワーカー識別名
@@ -63,13 +63,21 @@ export async function createBrowserEngine(init: BrowserControllerInitialization)
 
   await configureBrowserGpu(runtime, init.backend);
 
+  const manifestProfile = (init.manifest as unknown as { profile?: ModelManifestProfile }).profile;
   return initializeInferenceEngine(runtime, {
     backend: init.backend,
     cache: prepared.cache,
     wasmUrl: prepared.wasmUrl,
     factoryUrl: prepared.factoryUrl,
     codecs: prepared.codecs,
-    warmupImage: warmupImageBytes()
+    warmupImage: warmupImageBytes(),
+    modelRepository: init.manifest.repository,
+    modelRevision: init.manifest.revision,
+    dtype: manifestProfile?.dtype,
+    dimension: manifestProfile?.dimension,
+    vision: manifestProfile?.vision,
+    maxTokens: manifestProfile?.maxTokens,
+    prefix: manifestProfile?.prefix
   });
 }
 

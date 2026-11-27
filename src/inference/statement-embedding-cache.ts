@@ -43,13 +43,17 @@ interface CacheEntry {
  * 実装理由: 不正・破損した推論出力をキャッシュまたは SQLite へ渡さないため。
  * @param value - 検証対象のバイナリ。
  */
-export function validateEmbeddingBlob(value: unknown): void {
-  if (!(value instanceof Uint8Array) || value.byteLength !== 3072) {
+export function validateEmbeddingBlob(value: unknown, expectedDimension?: number): void {
+  if (!(value instanceof Uint8Array) || value.byteLength === 0 || value.byteLength % 4 !== 0) {
     throw new VectorError("E_EMBEDDING_VALUE");
   }
+  if (expectedDimension !== undefined && value.byteLength !== expectedDimension * 4) {
+    throw new VectorError("E_EMBEDDING_VALUE");
+  }
+  const dim = value.byteLength / 4;
   const view = new DataView(value.buffer, value.byteOffset, value.byteLength);
   let sumSquares = 0;
-  for (let i = 0; i < 768; i++) {
+  for (let i = 0; i < dim; i++) {
     const floatVal = view.getFloat32(i * 4, true);
     if (!Number.isFinite(floatVal)) {
       throw new VectorError("E_EMBEDDING_VALUE");
@@ -146,8 +150,9 @@ export class StatementEmbeddingCache {
     this.check();
 
     let key: string;
-    let entrySize: number;
+    let baseOverhead: number;
     let reqImageCopy: Uint8Array | undefined;
+    const modelKey = request.model ?? "";
 
     const getStrBytes = (s: string) =>
       typeof Buffer !== "undefined"
@@ -155,13 +160,13 @@ export class StatementEmbeddingCache {
         : new TextEncoder().encode(s).length;
 
     if (request.operation === "image") {
-      key = JSON.stringify([this.identityStr, "image", request.mime, request.bytes.length]);
-      entrySize = getStrBytes(key) + 3072 + request.bytes.length;
+      key = JSON.stringify([this.identityStr, "image", modelKey, request.mime, request.bytes.length]);
+      baseOverhead = getStrBytes(key) + request.bytes.length;
       reqImageCopy = new Uint8Array(request.bytes);
     } else {
       const normalizedTitle = request.title ?? "";
-      key = JSON.stringify([this.identityStr, request.operation, request.body, normalizedTitle]);
-      entrySize = getStrBytes(key) + 3072;
+      key = JSON.stringify([this.identityStr, request.operation, modelKey, request.body, normalizedTitle]);
+      baseOverhead = getStrBytes(key);
     }
 
     // ヒット探索
@@ -189,6 +194,8 @@ export class StatementEmbeddingCache {
       return null;
     }
     validateEmbeddingBlob(result);
+
+    const entrySize = baseOverhead + result.byteLength;
 
     // 単一エントリが許容容量を超える場合はキャッシュせず返却
     if (entrySize > this.capacity) {
