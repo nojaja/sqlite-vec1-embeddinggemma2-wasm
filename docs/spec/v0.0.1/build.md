@@ -76,12 +76,13 @@
   ├─ sqlite3.wasm (SQLite 3.54.1 + vec1 0.8)
   ├─ 公式ローダー群 (sqlite3-node.mjs, sqlite3-bundler-friendly.mjs 等 7 ファイル)
   └─ dist/sqlite3-node.mjs への条件付き patches/sqlite-official.patch 適用 ("Array.isArray(text)" 未適用時)
-[3/5] 製品エントリポイントおよびサンプルのバンドル (esbuild 全 10 エントリ)
+[3/5] 製品エントリポイントおよびサンプルのバンドル (esbuild 全 11 エントリ)
   ├─ dist/index.bundle.js (汎用メイン CJS)
   ├─ dist/node/index.{js,mjs} (Node エントリ CJS/ESM)
   ├─ dist/index-browser.mjs (ブラウザエントリ ESM)
   ├─ dist/workers/inference-node.js (Node 同期ブリッジ Worker CJS)
   ├─ dist/workers/inference-browser.mjs (ブラウザ推論 Worker ESM)
+  ├─ dist/workers/db-browser.mjs (ブラウザ DB Owner Promiser Worker ESM)
   └─ dist/samples/node/index.js, dist/samples/browser/{index.mjs,owner.mjs,server.js} (サンプルバンドル)
 [4/5] TypeScript 型定義ファイルの生成
   ├─ src/official/types.ts を dist/official/types.d.ts へ配置
@@ -277,6 +278,7 @@
 | `dist/index-browser.mjs` | `src/index-browser.ts`（`src/official/browser.ts` を再 export） | ESM | ブラウザ | 専用 Worker / OPFS SAH Pool 連携 |
 | `dist/workers/inference-node.js` | `src/workers/inference-node.ts` | CJS | Node Worker | Atomics 同期ブリッジおよび推論実行（`onnxruntime-node` external） |
 | `dist/workers/inference-browser.mjs`| `src/workers/inference-browser.ts` | ESM | ブラウザ Worker | WebGPU adapter 注入および推論実行 |
+| `dist/workers/db-browser.mjs` | `src/workers/db-browser.ts` | ESM | ブラウザ DB Worker | `sqlite3EmbeddingWorkerPromiser` 用 DB Owner Worker（SQLite + 同期 UDF 実行） |
 | `dist/samples/node/index.js` | `samples/node/index.ts` | CJS | Node サンプル | `import.meta.url` / `import.meta` ポリフィル注入（`onnxruntime-node` external） |
 | `dist/samples/browser/index.mjs` | `samples/browser/index.ts` | ESM | ブラウザサンプル | supervisor エントリ |
 | `dist/samples/browser/owner.mjs` | `samples/browser/owner.ts` | ESM | ブラウザサンプル | DB owner Worker エントリ |
@@ -300,7 +302,7 @@ esbuild で CJS 形式でバンドルする際、以下の設定を施す：
   - `patches/transformers-directml.patch`: バイト数および SHA-256
   - `patches/sqlite-official.patch`: バイト数および SHA-256
 - ビルド監査レポート（`dist/reports/`）:
-  - `dist/reports/esbuild-metafile.json`: 全 10 バンドルの esbuild metafile 統合レポート
+  - `dist/reports/esbuild-metafile.json`: 全 11 バンドルの esbuild metafile 統合レポート
   - `dist/reports/build-content.json`: 生成ファイル一覧とサイズ・ハッシュ監査レポート
   - `dist/reports/sbom.cdx.json`: CycloneDX 1.6 形式の SBOM（`createCycloneDxSbom` により生成）
 - パッチファイルが存在しない、あるいは SHA-256 が一致しない場合はビルドを即座にエラー停止（exit code 1）とする。各環境での決定論的再現性を保証し、未検証パッチやパッチ欠落のまま配布物が生成されることを防ぐ。
@@ -310,7 +312,7 @@ esbuild で CJS 形式でバンドルする際、以下の設定を施す：
 ## 6. 型定義ファイルの生成
 
 公式 `@sqlite.org/sqlite-wasm@3.54.1-build1` の型定義を統合した `src/official/types.ts` を `dist/official/types.d.ts` として配置し、各公開エントリポイント用の再エクスポート型定義ファイルを生成する。
-- 必須型エクスポート: 公式の `Sqlite3Static`, `Database`, `PreparedStatement`, `CAPI`, `WASM_API`, `SqlValue`, `Sqlite3Result`, `ExecOptions`, `BindingSpec`, `OpfsDb`, `sqlite3Worker1Promiser` および製品固有の `ProductSqlite3`, `ProductInitOptions`, `EmbeddingOptions`, `EmbeddingControl`, `Backend`
+- 必須型エクスポート: 公式の `Sqlite3Static`, `Database`, `PreparedStatement`, `CAPI`, `WASM_API`, `SqlValue`, `Sqlite3Result`, `ExecOptions`, `BindingSpec`, `OpfsDb`, `sqlite3Worker1Promiser` および製品固有の `ProductSqlite3`, `ProductInitOptions`, `EmbeddingOptions`, `EmbeddingControl`, `Backend`, `EmbeddingWorkerPromiserConfig`, `EmbeddingWorkerPromiserResponse`, `EmbeddingWorkerPromiser`
 - 生成成果物:
   - `dist/official/types.d.ts` (`src/official/types.ts` の配置)
   - `dist/index.d.ts` (`import type { ProductInitOptions, ProductSqlite3 } from "./official/types"; export default function initialize(options?: ProductInitOptions): Promise<ProductSqlite3>; export * from "./official/types";`)

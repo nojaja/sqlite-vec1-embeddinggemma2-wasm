@@ -34,13 +34,12 @@ beforeAll(prepareOfficialRuntime);
  */
 function vector(): Uint8Array { const bytes = new Uint8Array(3072); new DataView(bytes.buffer).setFloat32(0, 1, true); return bytes; }
 
-test("official real runtime: normal module keeps transactions, NULL and model-free diagnostics", async () => {
+test("official real runtime: normal module keeps transactions, DISTANCE and omits embedding UDFs when disabled", async () => {
   const api = await initializeOfficialRuntime(factory, {}, { worker: false, runtime: "node", platform: "win32", architecture: "x64" });
   const database = new api.oo1.DB(":memory:");
   try {
-    expect(database.selectValue("SELECT embedding(NULL)")).toBeNull();
-    expect(() => database.selectValue("SELECT embedding(NULL,'wrong')")).toThrow("E_INPUT");
-    expect(() => database.selectValue("SELECT embedding('body')")).toThrow("E_EMBEDDING_NOT_READY");
+    expect(() => database.selectValue("SELECT embedding('body')")).toThrow(/no such function/i);
+    expect(() => database.selectValue("SELECT embedding_query('query')")).toThrow(/no such function/i);
     database.exec("BEGIN; CREATE TABLE ordinary(value); INSERT INTO ordinary VALUES(1); COMMIT");
     expect(database.selectValue("SELECT value FROM ordinary")).toBe(1);
     expect(JSON.parse(String(database.selectValue("SELECT gemma_model_info()")))).toMatchObject({ ready: false });
@@ -109,16 +108,15 @@ test("official real runtime: capi string binding accepts the documented JS strin
   } finally { if (statement) api.capi.sqlite3_finalize(statement); api.wasm.dealloc(output); database.close(); }
 });
 
-test("official real runtime: embedding failures follow official logging behavior", async () => {
-  const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+test("official real runtime: registerEmbeddingExtension without infer does not register embedding UDFs", async () => {
   const api = await factory();
   const control = registerEmbeddingExtension(api);
   const database = new api.oo1.DB(":memory:");
   try {
-    expect(() => database.selectValue("SELECT embedding('private-text-sentinel')")).toThrow("E_EMBEDDING_NOT_READY");
-    // 公式仕様に従い、ステップ失敗時の警告ログが正しく発行されることを確認
-    expect(warn).toHaveBeenCalled();
-  } finally { warn.mockRestore(); database.close(); await control.close(); }
+    expect(() => database.selectValue("SELECT embedding('private-text-sentinel')")).toThrow(/no such function/i);
+    expect(() => database.selectValue("SELECT embedding_query('private-text-sentinel')")).toThrow(/no such function/i);
+    expect(JSON.parse(String(database.selectValue("SELECT gemma_model_info()")))).toMatchObject({ ready: false });
+  } finally { database.close(); await control.close(); }
 });
 
 test("official real runtime: DISTANCE accepts finite tiny and huge nonnormalized vectors", async () => {

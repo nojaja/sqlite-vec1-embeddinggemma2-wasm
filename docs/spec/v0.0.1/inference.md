@@ -171,9 +171,13 @@ https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/daa72c512439
 
 Node fetcherはHTTPS/loopback directoryだけ、userinfo/query/fragmentを拒否する。各assetのencoded pathをroot配下へ解決し、redirect=error、credentials=omit、cache=no-store。browserのモデル資材取得（`createBrowserModelReader`）も同様にHTTPS/loopback・userinfo/query/fragment禁止・末尾 `/` 必須を要求し、`fetch(targetUrl, { mode: "cors", credentials: "omit", cache: "no-store" })` によりクロスオリジンCDN（Hugging Face等）からのオンデマンド取得を許可する（HTTP応答非OK・サイズ不一致・SHA-256不一致はすべて `E_ASSET_INTEGRITY`）。一方、推論Worker・ORT Wasm・画像コーデックWasm・Transformers.jsポータブルランタイム等の実行資材は `workerUrl` 基準の同一オリジンに限定する。`src/workers/inference-browser.ts` ではキャッシュミス送出用に `VectorError` を明示インポートする。codec package取得は非空かつ32MiB以下を要求し、model用hash契約と区別する。offlineはmodel download 0だが、HTML/JS/Wasm/manifest/codecのローカル配信まで不要になる意味ではない。サイト全体のservice workerは利用者責務。
 
-## 6. 同期bridge
+## 6. 同期bridgeとブラウザ2段Worker構成
 
-DB ownerは同期UDF、推論Workerは非同期modelを所有する。MessageChannelで入力を送り、DB ownerだけがAtomics.waitする。browser main threadでwaitしない。SQL UDFから同接続へ再入SQLを呼ばず、推論WorkerからDBへの同期要求も行わない。
+DB ownerは同期UDF、推論Workerは非同期modelを所有する。MessageChannelで入力を送り、DB ownerだけがAtomics.waitする。browser main threadでwaitしない（browser main threadで直接 `initialize({ embedding })` が呼ばれた場合は初期化時に `E_ENVIRONMENT` で早期拒否する）。SQL UDFから同接続へ再入SQLを呼ばず、推論WorkerからDBへの同期要求も行わない。
+
+ブラウザメインスレッドから推論付き SQLite を利用する場合は、`sqlite3EmbeddingWorkerPromiser` を介して以下の 2 段 Worker 構成で実行する：
+- **Main Thread（Promiser RPC クライアント）**: `sqlite3EmbeddingWorkerPromiser(config)` が DB Owner Worker（`dist/workers/db-browser.mjs`）を起動し、`open` / `exec` / `close` / `embedding-info` / `shutdown` 等の操作を `postMessage` ベースの非同期 RPC として送信する。
+- **DB Owner Worker（`dist/workers/db-browser.mjs`）**: Dedicated Worker コンテキスト内で `initialize({ embedding })` を実行し、SQLite Wasm 本体と DB 接続を所有する。内部で推論 Worker（`dist/workers/inference-browser.mjs`）を起動し、`MessageChannel` + `SharedArrayBuffer` + `Atomics.wait` を用いて `embedding()` / `embedding_query()` UDF を安全に同期実行する。
 
 request envelopeは `{protocolVersion:1,jobId,requestId,generation,operation,input,responseBuffer}`。jobIdは非空string、requestIdはsafe integer>=1、generationはsafe integer>=0。text inputは `{text,title}`、imageは `{bytes,mime}`。元画像はcopyしcallerのbufferをdetachしない。ArrayBuffer画像はhandlerでUint8Arrayへ変換する。SABをtransfer listに入れない。
 

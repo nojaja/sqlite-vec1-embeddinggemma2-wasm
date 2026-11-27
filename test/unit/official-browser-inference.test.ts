@@ -210,7 +210,7 @@ test("createBrowserInferenceSession: initializes worker, awaits ready, and clean
         model: { network: "allow", baseUrl: "https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/main/" },
         workerUrl: "https://example.test/assets/inference-browser.mjs"
       } as never,
-      { worker: false, runtime: "browser", platform: "browser", architecture: "browser" }
+      { worker: true, runtime: "browser", platform: "browser", architecture: "browser" }
     )!;
 
     const session = await createSession!(validated, "https://example.test/package/dist/index-browser.mjs");
@@ -247,7 +247,7 @@ test("createBrowserInferenceSession: rejects with E_INFERENCE on worker failure 
 
   const validated = validateEmbeddingOptions(
     { model: { network: "offline" }, initTimeoutMs: 20 },
-    { worker: false, runtime: "browser", platform: "browser", architecture: "browser" }
+    { worker: true, runtime: "browser", platform: "browser", architecture: "browser" }
   )!;
 
   const failedGlobals = setupBrowserGlobals("failed");
@@ -268,7 +268,7 @@ test("createBrowserInferenceSession: rejects with E_INFERENCE on worker failure 
 });
 
 test("validateEmbeddingOptions: rejects non-string workerUrl and manifestUrl with E_INPUT", () => {
-  const env = { worker: false, runtime: "browser" as const, platform: "browser", architecture: "browser" };
+  const env = { worker: true, runtime: "browser" as const, platform: "browser", architecture: "browser" };
   expect(() =>
     validateEmbeddingOptions({ model: { network: "offline" }, workerUrl: 123 } as never, env)
   ).toThrow("E_INPUT");

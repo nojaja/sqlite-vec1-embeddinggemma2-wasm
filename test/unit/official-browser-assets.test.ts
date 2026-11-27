@@ -4,6 +4,7 @@ import { MODEL_REPOSITORY, MODEL_REVISION } from "../../src/runtime-assets/model
 test("official browser: resolves package-relative assets and default Hugging Face CDN URL independently of document URL", () => {
   const urls = resolveOfficialBrowserAssets("https://example.test/package/dist/index-browser.mjs");
   expect(urls.worker).toBe("https://example.test/package/dist/workers/inference-browser.mjs");
+  expect((urls as { dbWorker?: string }).dbWorker).toBe("https://example.test/package/dist/workers/db-browser.mjs");
   expect(urls.manifest).toBe("https://example.test/package/manifests/embeddinggemma2-q4.json");
   expect(urls.modelBase).toBe(`https://huggingface.co/${MODEL_REPOSITORY}/resolve/${MODEL_REVISION}/`);
 });
@@ -34,10 +35,12 @@ test("official browser: resolves explicit workerUrl and manifestUrl options for 
   const entry = "https://example.test/assets/index-browser.mjs";
   const resolved = resolveOfficialBrowserAssets(entry, {
     workerUrl: "./workers/custom-inference.mjs",
+    dbWorkerUrl: "./workers/custom-db.mjs",
     manifestUrl: "https://example.test/static/embeddinggemma2-q4.json",
     modelBaseUrl: "https://cdn.example.com/models/gemma2/"
-  });
+  } as Parameters<typeof resolveOfficialBrowserAssets>[1]);
   expect(resolved.worker).toBe("https://example.test/assets/workers/custom-inference.mjs");
+  expect((resolved as { dbWorker?: string }).dbWorker).toBe("https://example.test/assets/workers/custom-db.mjs");
   expect(resolved.manifest).toBe("https://example.test/static/embeddinggemma2-q4.json");
   expect(resolved.modelBase).toBe("https://cdn.example.com/models/gemma2/");
 });
