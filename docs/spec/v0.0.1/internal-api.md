@@ -13,16 +13,16 @@
 | module path | exportと署名 | 期待する動作 |
 | --- | --- | --- |
 | `src/errors.ts` | `VectorError extends Error`、constructor(code:ErrorCode) | name=VectorError、message=code、readonly code |
-| `src/inference/profile.ts` | `EMBEDDING_DIMENSION=768`, `EMBEDDING_BYTES=3072` | 定数を共用 |
-| 同上 | `assertTokenLimit(count:number):void` | safe integer>=0でなければE_PROTOCOL、>2048ならE_TOKEN_LIMIT |
-| 同上 | `embeddingToBlob(values:ArrayLike<number>,shape:readonly number[]):Bytes` | 正確なshape/finite/norm、Float64正規化、LE copy |
-| 同上 | `formatTextInput(operation,body,title,specialTokens):string|null` | query/document prefix、NULL、型/UTF8/NUL/special-token境界 |
+| `src/inference/profile.ts` | `EMBEDDING_DIMENSION=768`, `EMBEDDING_BYTES=3072`（既定参照定数） | 既定定数の共用（各処理は動的次元に対応） |
+| 同上 | `assertTokenLimit(count:number,maxTokens=2048):void` | safe integer>=0でなければE_PROTOCOL、>maxTokensならE_TOKEN_LIMIT |
+| 同上 | `embeddingToBlob(values:ArrayLike<number>,shape:readonly number[],dimension=EMBEDDING_DIMENSION):Bytes` | 動的 `dimension` に基づく正確なshape/finite/norm、Float64正規化、LE copy（`dimension * 4` バイト） |
+| 同上 | `formatTextInput(operation,body,title,specialTokens,prefixConfig?):string|null` | モデル別query/document prefix（未指定時はEmbeddingGemma既定）、NULL、型/UTF8/NUL/special-token境界 |
 | `src/inference/image.ts` | `validateImageInput(input:unknown,mime:unknown):ImageHeader` | width/height/type、復号前の資源制限 |
 | 同上 | `RawImage` constructor(data,width,height,channels)、size getter、rgb():RawImage、static read(input):Promise<RawImage>、resize(width,height,options?):Promise<RawImage> | 独立画素所有、同寸法は同instance、gray/alpha/Blob境界 |
 | 同上 | `decodeRawImage(bytes,mime):Promise<RawImage>`、`load_image` | Wasm decode後RGB、load_imageはRawImage.read alias |
 | `src/inference/image-codecs.ts` | `ImageCodecBytes={jpeg,png,resize}`、`initializeImageCodecs(assets):Promise<void>`、`decodeImageBytes(bytes,type):Promise<ImageData>`、`resizeRgba(image,width,height):Promise<ImageData>` | 同じWasm codec設定、未知I/Oを発生させない |
-| `src/inference/engine.ts` | `InferenceEngine(runtime)`、attach(processor,model):void、embed(request):Promise<MaybeBytes>、close():Promise<void> | 一度attach、全tensor解放、未知例外redaction、NULL短絡 |
-| `src/inference/initialize.ts` | `initializeInferenceEngine(runtime,options):Promise<InferenceEngine>`、`warmupImageBytes():Bytes` | codec/config/processor/model/warm-up順、失敗cleanup、initializeImageCodecs関数存在時の安全実行 |
+| `src/inference/engine.ts` | `InferenceEngine(runtime,profileConfig?)`、attach(processor,model):void、embed(request):Promise<MaybeBytes>、close():Promise<void> | 一度attach、モデル固有の `dimension` / `prefix` / `vision` / `maxTokens` を保持して動的shape検証・推論、全tensor解放、未知例外redaction、NULL短絡 |
+| `src/inference/initialize.ts` | `initializeInferenceEngine(runtime,options):Promise<InferenceEngine>`、`warmupImageBytes():Bytes` | `options.modelRepository`/`modelRevision`/`dtype`/`dimension`/`vision`/`prefix` に基づき codec（vision時）/config/processor/model/query warm-up/（vision時）image warm-up 順で初期化、失敗cleanup、initializeImageCodecs関数存在時の安全実行 |
 | `src/inference/browser-initialize.ts` | `prepareBrowserInference(options):Promise<PreparedBrowserInference>`、`configureBrowserGpu(runtime,backend,gpu?):Promise<void>` | 永続cacheを先に準備、`workerUrl`基準のパッケージ資材（ORT/codec）、`modelBaseUrl`は外部CDN許容（`isSecureBrowserUrl`検証）、variant別URL、明示GPU取得 |
 
 engine requestはquery/documentなら `{operation,body:unknown,title?:unknown}`、imageなら `{operation:"image",bytes:unknown,mime:unknown}`。RuntimeInputsは任意tensor項目と `input_ids:{data:ArrayLike<number|bigint>,dims:readonly number[]}`。processorはasync callable(text:string|null,image:unknown)とtokenizer.all_special_tokens、modelはasync callable(inputs)とasync disposeを持つ。出力はRecord<string,unknown>。
@@ -36,23 +36,23 @@ InferenceInitialization共通は `{cache:object,codecs:ImageCodecBytes,warmupIma
 | module path | exportと署名 | 期待する動作 |
 | --- | --- | --- |
 | `src/bridge/protocol.ts` | createResponseBuffer():SharedArrayBuffer | 新品8192B、version field=1 |
-| 同上 | publishResponse(buffer,payload,errorId=0):boolean | CAS占有・publish、放棄済み/二重応答false |
-| 同上 | readResponse(buffer):BridgeResponse | terminal検査後 `{payload:copy,errorId}` |
+| 同上 | publishResponse(buffer,payload,errorId=0):boolean | CAS占有・publish（OK時は `payload.byteLength` が4の倍数かつ4..8160、header[3]=`payload.byteLength / 4`）、放棄済み/二重応答false |
+| 同上 | readResponse(buffer):BridgeResponse | terminal検査後、`dim > 0 && payloadLen === dim * 4 && payloadLen <= 8160` を検証し `{payload:copy,errorId,dimension:dim}` を返却 |
 | 同上 | abandonResponse(buffer):boolean | 放棄成立true、公開済みfalse、未知state拒否 |
 | 同上 | waitResponse(buffer,cancel,deadline):BridgeResponse | 通知先行、cancel/deadline、50ms再確認 |
 | `src/bridge/inference-health.ts` | validateInferenceHealth(value):SharedArrayBufferまたはundefined | undefined可、他は4-byte SABのみ、異常E_PROTOCOL |
 | 同上 | publishInferenceHealth(bufferまたはundefined,state:1/2/3):void | optionalならno-op、atomic store+notify |
 | 同上 | assertInferenceReady(buffer):void | 値1以外E_INFERENCE |
-| `src/workers/db.ts` | requestEmbedding(port,request,cancellationBuffer,timeoutMs):MaybeBytes | 同期結果、NULL短絡、画像copy、送信失敗E_INFERENCE |
-| `src/workers/inference.ts` | handleInferenceRequest(engine,message:unknown,generation:number):Promise<boolean> | 応答publishとfatal bool、stale世代を無視 |
+| `src/workers/db.ts` | requestEmbedding(port,request,cancellationBuffer,timeoutMs):MaybeBytes | `request.model` を envelope へ含めて送信、同期結果（`dim * 4` バイト）、NULL短絡、画像copy、送信失敗E_INFERENCE |
+| `src/workers/inference.ts` | handleInferenceRequest(engineOrResolver,message:unknown,generation:number):Promise<boolean> | `msg.model` に応じて単一エンジンまたはモデル別エンジンマップから対象エンジンを選択し推論実行、応答publishとfatal bool、stale世代を無視 |
 | `src/workers/inference-browser-controller.ts` | BrowserInferenceController(host,createEngine)、receiveControl(message):void、whenIdle():Promise<void> | 初期化/推論/終了の直列chain、ready/failed/closed、port回収 |
 | `src/workers/inference-browser.ts` | ブラウザ推論専用 Worker エントリ（`dist/workers/inference-browser.mjs` のバンドル入力） | `globalThis.addEventListener("message", ...)` と `BrowserInferenceController` を接続し、`prepareBrowserInference` + `initializeInferenceEngine`（`@huggingface/transformers` バンドル）で実エンジンを生成。`VectorError` を明示インポートし、`createBrowserModelReader` へ `modelBaseUrl` を渡してクロスオリジンCDN/OPFS連携を実行する。`healthBuffer` 省略時は 4 バイトの `SharedArrayBuffer` を既定割り当てし、バンドル出力（`dist/workers/inference-browser.mjs`）に `"inference-browser"` 識別文字列を含め、Node 組み込みモジュールや `onnxruntime-node` を一切含めない |
 | `src/workers/inference-node.ts` | Node 推論専用 Worker エントリ（`dist/workers/inference-node.js` のバンドル入力） | `worker_threads` の `parentPort` で初期化を受け、`prepareNodeModelCache` + `initializeInferenceEngine`（portable Wasm または DirectML バンドル）を起動し `handleInferenceRequest` で同期ブリッジ要求を処理。`workerData` による自動即時初期化と、空 `workerData` 起動後の `kind: "initialize"` メッセージによる遅延初期化プロトコル（初期化完了時に `{ type: "ready", kind: "ready" }` 返信、`kind: "close"` メッセージでの安全クローズと `{ kind: "closed" }` 返信）の双方に対応する。DirectML 実行時は `dist/vendor/transformers-directml-node.js` をランタイムとしてロードする。バンドル出力（`dist/workers/inference-node.js`）では `onnxruntime-node` を外部（external）参照として保持する |
-| `src/workers/db-browser.ts` | ブラウザ DB Owner Promiser Worker エントリ（`dist/workers/db-browser.mjs` のバンドル入力） | `sqlite3EmbeddingWorkerPromiser` から Dedicated Worker として起動される。`kind: "initialize"` メッセージで `embedding` オプションを受信して `src/official/browser.ts` の `initialize({ embedding })` を実行し（Dedicated Worker コンテキストのため `Atomics.wait` が安全に動作）、以降の RPC メッセージ（`open`、`exec`、`close`、`embedding-info`、`shutdown` 等）を処理して結果を `postMessage` で返す。`open` では公式互換の `filename` / `vfs`（`opfs-sahpool` 等）をサポートし、`shutdown` では全開DBのクローズ後に `sqlite3.embedding.close()` を実行して推論 Worker を確実に終了する |
+| `src/workers/db-browser.ts` | ブラウザ DB Owner Promiser Worker エントリ（`dist/workers/db-browser.mjs` のバンドル入力） | `sqlite3EmbeddingWorkerPromiser` から Dedicated Worker として起動される。`kind: "initialize"` メッセージで `embedding` オプションを受信して `src/official/browser.ts` の `initialize({ embedding })` を実行し（Dedicated Worker コンテキストのため `Atomics.wait` が安全に動作）、以降の RPC メッセージ（`open`、`exec`、`close`、`embedding-info`、`shutdown` 等）を処理して結果を `postMessage` で返す。`open` では公式互換の `filename` / `vfs`（`opfs-sahpool`、`opfs`、`opfs-wl` 等）をサポートし、同梱される `dist/workers/sqlite3-opfs-async-proxy.js` を `import.meta.url` 相対で解決可能とする。`shutdown` では全開DBのクローズ後に `sqlite3.embedding.close()` を実行して推論 Worker を確実に終了する |
 
-DbEmbeddingRequestはjobId/requestId/generationとquery/documentのbody/title、またはimageのbytes/mime。DB owner 側の `port`（`InferenceRequestPort`）は `postMessage(message:unknown):void` だけを必要とする。timeoutは有限>=0、requestId>=1、generation>=0、非空jobIdでなければE_PROTOCOL。NULL本文短絡はenvelope検証後で、画像はUint8Arrayをcopyする。portへ渡すinputはbodyでなくtextという名前を使用する。
+DbEmbeddingRequestはjobId/requestId/generation/任意modelとquery/documentのbody/title、またはimageのbytes/mime。DB owner 側の `port`（`InferenceRequestPort`）は `postMessage(message:unknown):void` だけを必要とする。timeoutは有限>=0、requestId>=1、generation>=0、非空jobIdでなければE_PROTOCOL。NULL本文短絡はenvelope検証後で、画像はUint8Arrayをcopyする。portへ渡すinputはbodyでなくtextという名前を使用する。
 
-BrowserControllerInitializationはkind=initialize、generation、backend、network、modelBaseUrl、manifest={modelId,repository,revision,artifactSetHash,fingerprint,assets}、inferencePort、任意healthBuffer。hostはpostMessageとclose。createEngineはwarm-up済みengineをasync返却する。generationやmodel manifestをfactoryより先に検証する。`BrowserInferenceController` の初期化前検証では、`manifest` の `modelId` / `repository` / `revision`、64桁小文字hexの `artifactSetHash` / `fingerprint`、および `Array.isArray(manifest.assets)` を確認し、`manifest.assets.length > 0` のときは `validateModelAssets(manifest.assets)` を実行する（`manifest.assets.length === 0` の単体テスト fixture は controller 単体境界では許容し、実 `createEngine` 内の `prepareBrowserInference` / `PersistentModelCache` で必須11資材を検証する）。また、Worker 側の `inferencePort`（`BrowserInferencePort`）は要求受信（`onmessage`）・開始（`start()`）・終了（`close()`）のみを担い応答は `responseBuffer`（SAB）に書き込むため、初期化検証では `start` および `close` が関数であることのみを確認し、`postMessage` を要求しない。
+BrowserControllerInitializationはkind=initialize、generation、backend、network、modelBaseUrl、manifest={schemaVersion,modelId,repository,revision,artifactSetHash,fingerprint,profile,assets}（および複数モデル時の `models` マップ）、inferencePort、任意healthBuffer。hostはpostMessageとclose。createEngineはwarm-up済みengine（またはモデル名→engineのマップ）をasync返却する。generationやmodel manifestをfactoryより先に検証する。`BrowserInferenceController` の初期化前検証では、固定の `MODEL_ID` / `MODEL_REPOSITORY` / `MODEL_REVISION` 一致比較を行わず、汎用マニフェストスキーマ（`schemaVersion === 1`、非空の `modelId` / `repository` / `revision`、64桁小文字hexの `artifactSetHash` / `fingerprint`、正整数の `profile.dimension`、および `Array.isArray(manifest.assets)`）を確認し、`manifest.assets.length > 0` のときは `validateModelAssets(manifest.assets)` を実行する（`manifest.assets.length === 0` の単体テスト fixture は controller 単体境界では許容し、実 `createEngine` 内の `prepareBrowserInference` / `PersistentModelCache` で資材検証を強制する）。また、Worker 側の `inferencePort`（`BrowserInferencePort`）は要求受信（`onmessage`）・開始（`start()`）・終了（`close()`）のみを担い応答は `responseBuffer`（SAB）に書き込むため、初期化検証では `start` および `close` が関数であることのみを確認し、`postMessage` を要求しない。
 
 ## 4. Statementと公式adapter
 
@@ -62,8 +62,8 @@ interface EmbeddingCacheIdentity {
   profile: string; backend: string; runtimeGeneration: number;
 }
 type EmbeddingCall =
-  | { operation: "query" | "document"; body: unknown; title: unknown }
-  | { operation: "image"; bytes: Uint8Array; mime: string };
+  | { operation: "query" | "document"; body: unknown; title: unknown; model?: string }
+  | { operation: "image"; bytes: Uint8Array; mime: string; model?: string };
 type EmbeddingExecutionBudget = {
   deadline: number; cancellationBuffer: SharedArrayBuffer;
 };
@@ -74,21 +74,21 @@ type EmbeddingInference = (
 
 | module path | export/メソッド | 動作 |
 | --- | --- | --- |
-| `src/inference/statement-embedding-cache.ts` | validateEmbeddingBlob(value):void | 正確3072B、finite、norm許容 |
+| `src/inference/statement-embedding-cache.ts` | validateEmbeddingBlob(value,expectedDimension?):void | 4の倍数の非空バイト長（`expectedDimension` 指定時は `expectedDimension * 4`）、finite、norm許容 |
 | 同上 | StatementEmbeddingCache(identity,capacity=33554432,check=空関数) | capacityはsafe integer1..33554432、それ以外E_INPUT |
-| 同上 | resolve(request,infer):MaybeBytes、dispose():void、statistics():Counters | hit/miss/eviction/copyと終了済み拒否 |
+| 同上 | resolve(request,infer):MaybeBytes、dispose():void、statistics():Counters | hit/miss/eviction/copy（サイズ計算は実BLOBバイト長 `result.byteLength` を使用、キーに `request.model` を含めモデル間衝突を防止）と終了済み拒否 |
 | `src/sqlite/statement-lifecycle.ts` | StatementLifecycle(identity,timeoutMs,clock=performance.now,health?) | module世代、単調期限、health callback |
 | 同上 | enter(database:number,statement:number):StatementExecution | active step中の再入E_PROTOCOL、新規generationまたはROW継続 |
 | 同上 | leave(statement,result):void | result100だけcache保持、異statementのPROFILEでrunningを消さない |
 | 同上 | current():StatementExecution、hasActiveStep():boolean | currentはhealth/cancel/deadline/identityを検証 |
 | 同上 | reset(statement)、close(database)、cancel(database?)、statistics() | 各対象だけ破棄/取消、終了counter累積 |
-| `src/official/functions.ts` | embeddingSqlValue(name,args:readonly unknown[],infer?):MaybeBytes | generic model先行検証、用途・NULL・準備状態 |
-| `src/official/options.ts` | validateEmbeddingOptions(options,environment):ReadyEmbeddingOptionsまたはundefined | 製品仕様の検証順と既定値（任意 `workerUrl` / `manifestUrl` の文字列型検証を含む）。`env.runtime === "browser"` かつ `!env.worker`（メインスレッド / `window` コンテキスト）で `options` が指定された場合は、初期化時点で即座に `VectorError("E_ENVIRONMENT")` を送出し、Dedicated Worker 内での実行または `sqlite3EmbeddingWorkerPromiser` の利用を促すガイダンスを `console.warn` で出力する |
+| `src/official/functions.ts` | embeddingSqlValue(name,args:readonly unknown[],infer?,allowedModels?,resolveModel?):MaybeBytes | ハードコードモデル判定を廃止し、`allowedModels`（登録済みモデル集合）に基づくモデル検証、省略時のコンテキスト自動解決、および解決済み `model` の `EmbeddingCall` への伝播をNULL/準備状態より先に実行 |
+| `src/official/options.ts` | validateEmbeddingOptions(options,environment):ReadyEmbeddingOptionsまたはundefined | 製品仕様の検証順と既定値（任意 `workerUrl` / `manifestUrl` / `models` / `defaultModel` の型・構造検証を含む）。`env.runtime === "browser"` かつ `!env.worker`（メインスレッド / `window` コンテキスト）で `options` が指定された場合は、初期化時点で即座に `VectorError("E_ENVIRONMENT")` を送出し、Dedicated Worker 内での実行または `sqlite3EmbeddingWorkerPromiser` の利用を促すガイダンスを `console.warn` で出力する |
 | `src/official/initialize.ts` | initializeOfficialRuntime(factory,options={},environment,prepare?):Promise<ProductSqlite3> | embeddingだけ分離して公式option転送、session/拡張終了、pool非破壊解放 |
-| `src/official/registration.ts` | registerEmbeddingExtension(sqlite3,infer?,options?):EmbeddingControl | all-open auto-extension、trace/protection、functionCallsとcache、動的モデルプロファイル登録。`infer` が提供されている場合のみ `embedding` / `embedding_query` UDF を登録し、`infer` 未指定時は `gemma_model_info()`（`{"ready":false}`）および `DISTANCE()` のみを登録する。`sqlite3_progress_handler` によるタイムアウト・キャンセル内部監視（100命令周期）とユーザー定義進捗ハンドラの多重化合成（`compositeProgress`）を提供し、`WrappedDB` ではフック前の `origProgressHandler` を用いて監視を登録することで自己再帰（スタックオーバーフロー）を防止する |
+| `src/official/registration.ts` | registerEmbeddingExtension(sqlite3,infer?,options?):EmbeddingControl | all-open auto-extension、trace/protection、functionCallsとcache、動的モデルプロファイル登録。`inferWrapper` は `r.model` をそのまま `infer` へ渡し、Authorizer コンテキスト解決（4.2.2）と連携して対象モデルを決定する。`infer` が提供されている場合のみ `embedding` / `embedding_query` UDF を登録し、`infer` 未指定時は `gemma_model_info()`（`{"ready":false}`）および `DISTANCE()` のみを登録する。`sqlite3_progress_handler` によるタイムアウト・キャンセル内部監視（100命令周期）とユーザー定義進捗ハンドラの多重化合成（`compositeProgress`）を提供し、`WrappedDB` ではフック前の `origProgressHandler` を用いて監視を登録することで自己再帰（スタックオーバーフロー）を防止する |
 | `src/official/vector-metadata.ts` | `VectorColumnMetadata`, `TableColumnInfoRow`, `ModelProfileDefinition`, `AuthorizerNotification`, `ModelResolutionOptions` 型、`parseVectorTypeDeclaration(typeString:string):VectorColumnMetadata\|undefined`、`extractVectorColumnsFromTableInfo(tableName:string,rows:readonly TableColumnInfoRow[]):Record<string,VectorColumnMetadata>`、`resolveModelFromAuthorizer(notifications:readonly AuthorizerNotification[],tableMetadata:Readonly<Record<string,Readonly<Record<string,VectorColumnMetadata>>>>,options:ModelResolutionOptions,insertTarget?:{readonly table:string;readonly column:string}):string`、`calculateCosineDistance(left:unknown,right:unknown):number\|null`、`evaluateReferenceModelNetworkPolicy(network:"allow"\|"offline",hasCache:boolean):"fetch"\|"cache"` | `VECTOR(dim[, 'model'])` 型宣言解析、`PRAGMA table_info` からの列メタデータ抽出（`Record<string, VectorColumnMetadata>` 返却）、Authorizer 通知（`INSERT=18`、`UPDATE=23` および単体テスト互換 `UPDATE=9` かつ `arg1 && arg2` 非空、`FUNCTION=31`）からの優先順位別モデル解決、コサイン距離計算、参照モデル通信方針判定 |
 | `src/official/lifecycle-adapter.ts` | OfficialLifecycleAdapter(sqlite3,lifecycle?,onClose?)、observe(db)、assertClosed()、dispose() | 元capi保持、callback合成、close追跡、元binding復元 |
-| `src/official/metadata.ts` | officialMetadataRecord(identity)、validateOfficialMetadata(actual,identity)、initializeOfficialMetadata(sqlite3,db,identity) | 保存仕様の7項目（`productVersion: "0.0.3"` 固定）、DDL、空DB判定 |
+| `src/official/metadata.ts` | officialMetadataRecord(identity)、validateOfficialMetadata(actual,identity)、initializeOfficialMetadata(sqlite3,db,identity) | 保存仕様の7項目（`productVersion: "0.0.3"` 固定、`dimension` および `dtype` は `identity` 由来の動的値）、DDL、空DB判定 |
 | 同上 | OfficialMetadataProtection(sqlite3)、observe(db)、close(db)、dispose() | 内部保護と利用者authorizer合成 |
 | `src/official/node-files.ts` | canonicalNodeSqlitePath(filename):string、NodeSqliteFiles | canonical path、同期I/O、fd/temp/lockの単一所有 |
 | `src/official/node-file-ownership.ts` | NodeFileOwnership(filename)、release():void | kernel IPC排他、同process Worker死亡から復旧 |
@@ -102,7 +102,7 @@ StatementExecutionはdatabase/statement/generation/deadline/cancelled/cancellati
 
 InitializationEnvironmentはworker:boolean、runtime=node/browser、platform、architecture、任意nodeMajor。内部検証でnodeMajor省略は24として扱う。ReadyEmbeddingOptionsはbackend/initTimeoutMs/sqlTimeoutMsが必須化されたoptions。
 
-OfficialFactoryは `(options?:Record<string,unknown>)=>Promise<Sqlite3Static>`。OfficialInferenceFactoryはReadyEmbeddingOptionsからsessionを返す。sessionはinfer/identity/information/任意assertReady/async close。`createNodeInferenceSession` および `createBrowserInferenceSession` が構築する `information` は `{ ready: true, modelId: manifest.modelId, dtype: "q4", dimension: 768, backend: options.backend, fingerprint: manifest.fingerprint }` とし、`registerEmbeddingExtension` が登録する `gemma_model_info()`（arity 0、`SQLITE_UTF8`）は推論無効時は `JSON.stringify({ ready: false })`、有効時は `JSON.stringify({ ready: true, ...options?.information, functionCalls, cache: lifecycle.statistics() })` を返す（`embedding` / `embedding_query` は `SQLITE_UTF8 | SQLITE_DIRECTONLY` で登録）。registration optionsはidentity/timeoutMs/information/任意check/models/defaultModel。pool mockはinstallOpfsSAHPoolVfsが返すpauseVfsを観測可能にする。
+OfficialFactoryは `(options?:Record<string,unknown>)=>Promise<Sqlite3Static>`。OfficialInferenceFactoryはReadyEmbeddingOptionsからsessionを返す。sessionはinfer/identity/information/任意assertReady/async close。`createNodeInferenceSession` および `createBrowserInferenceSession` が構築する `information` は `{ ready: true, modelId: manifest.modelId, dtype: manifest.profile?.dtype ?? "q4", dimension: manifest.profile?.dimension ?? 768, backend: options.backend, fingerprint: manifest.fingerprint, models?: ... }` とし、`registerEmbeddingExtension` が登録する `gemma_model_info()`（arity 0、`SQLITE_UTF8`）は推論無効時は `JSON.stringify({ ready: false })`、有効時は `JSON.stringify({ ready: true, ...options?.information, functionCalls, cache: lifecycle.statistics() })` を返す（`embedding` / `embedding_query` は `SQLITE_UTF8 | SQLITE_DIRECTONLY` で登録）。registration optionsはidentity/timeoutMs/information/任意check/models/defaultModel。pool mockはinstallOpfsSAHPoolVfsが返すpauseVfsを観測可能にする。
 
 NodeSqliteFilesメソッドはopen(identifier,filenameまたはnull,{create,readonly,main,removeOnClose})、read(identifier,output,offset):number、write(identifier,input,offset):void、sync、truncate(identifier,size)、size(identifier):number、accessible(filename,writable):boolean、delete(filename,synchronize)、close(identifier)、dispose()。readはゼロ埋めした実byte数、未登録identifierはE_STORAGE。ファイルをcloseした後は再open可能で、重複ownerはE_DATABASE_LOCKED。
 
@@ -112,8 +112,8 @@ NodeSqliteFilesメソッドはopen(identifier,filenameまたはnull,{create,read
 
 | module path | export/メソッド |
 | --- | --- |
-| `src/runtime-assets/model-contract.ts` | MODEL_ID、MODEL_REPOSITORY、MODEL_REVISION、MODEL_ASSET_FILES、ModelAssetDigest、validateModelAssets(assets):void |
-| `src/runtime-assets/verified-cache.ts` | VerifiedModelCache(assets,reader)、match(request:string/Request):Promise<Response/undefined>、put(request,response):Promise<void> |
+| `src/runtime-assets/model-contract.ts` | MODEL_ID、MODEL_REPOSITORY、MODEL_REVISION、MODEL_ASSET_FILES、ModelAssetDigest、ModelManifest、validateModelManifest(manifest):void、validateModelAssets(assets,options?):void |
+| `src/runtime-assets/verified-cache.ts` | VerifiedModelCache(assets,reader,repoOptions?)、match(request:string/Request):Promise<Response/undefined>、put(request,response):Promise<void> |
 | `src/runtime-assets/persistent-model-cache.ts` | ModelCacheMode=online/cold/offline、PersistentModelCache(options)、initialize(mode)、recover()、read(path) |
 | `src/runtime-assets/node-persistent-cache-storage.ts` | NodePersistentCacheStorage.create(directory,options?)、createNodePersistentCacheStorage(directory,options?) |
 | `src/runtime-assets/browser-opfs-cache-storage.ts` | BrowserOpfsPersistentCacheStorage(root,locks,options?)、createBrowserOpfsPersistentCacheStorage(options?) |
@@ -183,7 +183,7 @@ export type RuntimeModel = (
 | `src/inference/backends/directml-vision-graph.ts` | patchDirectMlVisionGraph(source):{bytes,changed,sha256}、DirectMlModelCache(source)、async match、async put():never、patchInfo():{changed,bytes:number,sha256}/undefined |
 | `src/inference/embedding-quality.ts` | evaluateEmbeddingQuality(pairs,thresholds):EmbeddingQualityReport |
 
-EmbeddingQualityPairはid/modality=textまたはimage/candidate:Float32Array/reference:Float32Array。閾値はtext/imageごとの `{mean:number,each:number}`。返値はpassedとtext/imageそれぞれ `{count,mean,minimum,passed}`。両modalityが必要、空/重複idはE_INPUT、768以外/非finite/ゼロvectorはE_EMBEDDING_VALUE。独立cosine集計をし、平均だけで各件の劣化を隠さない。
+EmbeddingQualityPairはid/modality=textまたはimage/candidate:Float32Array/reference:Float32Array。閾値はtext/imageごとの `{mean:number,each:number}`。返値はpassedとtext/imageそれぞれ `{count,mean,minimum,passed}`。両modalityが必要、空/重複idはE_INPUT、空/次元不一致/非finite/ゼロvectorはE_EMBEDDING_VALUE。独立cosine集計をし、平均だけで各件の劣化を隠さない。
 
 ## 7. Tooling/CLIのテスト互換
 
