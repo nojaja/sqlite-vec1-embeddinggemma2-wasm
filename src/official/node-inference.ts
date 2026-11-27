@@ -116,7 +116,35 @@ export async function createNodeInferenceSession(
       if (closed) return;
       closed = true;
       try {
-        worker.postMessage({ kind: "close" });
+        await new Promise<void>((res) => {
+          const timer = setTimeout(() => {
+            cleanup();
+            res();
+          }, 5000);
+          timer.unref?.();
+
+          const onMessage = (msg: unknown) => {
+            if ((msg as { kind?: string } | null)?.kind === "closed") {
+              cleanup();
+              res();
+            }
+          };
+          const onDone = () => {
+            cleanup();
+            res();
+          };
+          const cleanup = () => {
+            clearTimeout(timer);
+            worker.off("message", onMessage);
+            worker.off("exit", onDone);
+            worker.off("error", onDone);
+          };
+
+          worker.on("message", onMessage);
+          worker.on("exit", onDone);
+          worker.on("error", onDone);
+          worker.postMessage({ kind: "close" });
+        });
         await worker.terminate();
       } catch {
         // 無視
