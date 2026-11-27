@@ -147,7 +147,11 @@ async function initializeNodeWorker(init: NodeInferenceWorkerInitialization): Pr
       baseUrl: init.modelBaseUrl,
       assets: manifestData.assets,
       artifactSetHash: manifestData.artifactSetHash,
-      manifestHash
+      manifestHash,
+      modelId: manifestData.modelId,
+      repository: manifestData.repository,
+      revision: manifestData.revision,
+      strictAllowlist: (manifestData.repository ?? MODEL_REPOSITORY) === MODEL_REPOSITORY
     });
     if (backend === "directml") {
       cache = new DirectMlModelCache(preparedCache);

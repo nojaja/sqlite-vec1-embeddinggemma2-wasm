@@ -9,7 +9,7 @@ import { initializeInferenceEngine, warmupImageBytes } from "../inference/initia
 import type { PortableRuntime, InferenceEngine } from "../inference/engine";
 import { createBrowserOpfsPersistentCacheStorage } from "../runtime-assets/browser-opfs-cache-storage";
 import { PersistentModelCache } from "../runtime-assets/persistent-model-cache";
-import { MultiModelVerifiedCache, VerifiedModelCache } from "../runtime-assets/verified-cache";
+import { MultiModelVerifiedCache } from "../runtime-assets/verified-cache";
 import { createBrowserModelReader } from "../runtime-assets/browser-model";
 import { MODEL_REPOSITORY, type ModelAssetDigest, type ModelManifestProfile } from "../runtime-assets/model-contract";
 
@@ -58,19 +58,13 @@ export async function createBrowserEngine(init: BrowserControllerInitialization)
     artifactSetHash: init.manifest.artifactSetHash,
     manifestHash: init.manifest.fingerprint,
     assets,
-    persistentCache
+    persistentCache,
+    repository: init.manifest.repository,
+    revision: init.manifest.revision,
+    strictAllowlist: init.manifest.repository === MODEL_REPOSITORY
   });
 
-  const modelVerifiedCache = new VerifiedModelCache(
-    assets,
-    (path) => persistentCache.read(path),
-    {
-      repository: init.manifest.repository,
-      revision: init.manifest.revision,
-      strictAllowlist: init.manifest.repository === MODEL_REPOSITORY
-    }
-  );
-  sharedMultiModelCache.register(modelVerifiedCache);
+  sharedMultiModelCache.register(prepared.cache);
 
   const runtimeUrl = new URL("../vendor/transformers-portable.mjs", workerUrl).href;
   const runtime = (await import(/* @vite-ignore */ runtimeUrl)) as unknown as PortableRuntime;

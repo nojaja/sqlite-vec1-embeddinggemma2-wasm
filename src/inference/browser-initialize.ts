@@ -39,6 +39,9 @@ export interface PrepareBrowserInferenceOptions {
   assets: readonly ModelAssetDigest[];
   fetcher?: typeof fetch;
   persistentCache?: BrowserPersistentModelCache;
+  repository?: string;
+  revision?: string;
+  strictAllowlist?: boolean;
 }
 
 /**
@@ -128,8 +131,14 @@ export async function prepareBrowserInference(
 
   await options.persistentCache.initialize(options.network === "allow" ? "online" : "offline");
 
-  const verifiedCache = new VerifiedModelCache(options.assets, (logicalPath: string) =>
-    options.persistentCache!.read(logicalPath)
+  const verifiedCache = new VerifiedModelCache(
+    options.assets,
+    (logicalPath: string) => options.persistentCache!.read(logicalPath),
+    {
+      repository: options.repository,
+      revision: options.revision,
+      strictAllowlist: options.strictAllowlist
+    }
   );
 
   return {

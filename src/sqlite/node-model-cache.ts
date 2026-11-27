@@ -77,6 +77,10 @@ export interface NodeModelCacheOptions {
   assets: readonly ModelAssetDigest[];
   artifactSetHash: string;
   manifestHash: string;
+  modelId?: string;
+  repository?: string;
+  revision?: string;
+  strictAllowlist?: boolean;
 }
 
 /**
@@ -112,13 +116,21 @@ export async function prepareNodeModelCache(
     assets: options.assets,
     artifactSetHash: options.artifactSetHash,
     manifestHash: options.manifestHash,
+    modelId: options.modelId,
+    strictAllowlist: options.strictAllowlist,
     storage,
     fetcher: nodeFetcher
   });
 
   await persistentCache.initialize(options.network === "allow" ? "online" : "offline");
 
-  return new VerifiedModelCache(options.assets, (logicalPath: string) =>
-    persistentCache.read(logicalPath)
+  return new VerifiedModelCache(
+    options.assets,
+    (logicalPath: string) => persistentCache.read(logicalPath),
+    {
+      repository: options.repository,
+      revision: options.revision,
+      strictAllowlist: options.strictAllowlist
+    }
   );
 }
